@@ -120,6 +120,7 @@ typedef struct nmbs_z_server_rtu {
     struct k_timer silence_timer;
     struct k_work work;
     uint8_t server_address;
+    bool running;
 } nmbs_z_server_rtu_t;
 
 /**
@@ -135,6 +136,34 @@ int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
                            const nmbs_z_serial_transport_config_t *config,
                            const nmbs_callbacks *callbacks,
                            uint8_t server_address);
+
+/**
+ * @brief Start the Modbus RTU Server engine.
+ *
+ * @param server Pointer to server instance.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t *server);
+
+/**
+ * @brief Stop the Modbus RTU Server engine.
+ *
+ * Stops the silence timer and cancels any pending work on the workqueue.
+ *
+ * @param server Pointer to server instance.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t *server);
+
+/**
+ * @brief Feed a received byte into the RTU Server engine and restart the silence timer.
+ *
+ * Can be called from UART ISR or polling thread.
+ *
+ * @param server Pointer to server instance.
+ * @param byte Received byte.
+ */
+void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t *server, uint8_t byte);
 
 #endif /* CONFIG_NANOMODBUS_SERVER_RTU */
 

@@ -7,4 +7,5 @@ target_sources(app PRIVATE
     src/test_error_mapping.c
     src/test_rs485_timing.c
     src/test_client_concurrency.c
+    src/test_server_rtu.c
 )

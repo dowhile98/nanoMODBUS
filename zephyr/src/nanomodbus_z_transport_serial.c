@@ -69,7 +69,7 @@ int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
     ring_buf_init(&transport->rx_rb, transport->rx_buf_size, transport->rx_buf);
     k_sem_init(&transport->rx_sem, 0, K_SEM_MAX_LIMIT);
 
-    memset(platform_conf, 0, sizeof(*platform_conf));
+    nmbs_platform_conf_create(platform_conf);
     platform_conf->transport = NMBS_TRANSPORT_RTU;
     platform_conf->read = nmbs_z_transport_serial_read;
     platform_conf->write = nmbs_z_transport_serial_write;
