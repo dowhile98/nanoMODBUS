@@ -5,4 +5,5 @@ project(test_nanomodbus_baseline)
 target_sources(app PRIVATE
     src/test_build_baseline.c
     src/test_error_mapping.c
+    src/test_rs485_timing.c
 )
