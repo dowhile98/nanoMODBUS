@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: MIT
+
+menuconfig NANOMODBUS
+	bool "nanoMODBUS support"
+	help
+	  Enable support for the nanoMODBUS compact Modbus RTU/TCP library.
+
+if NANOMODBUS
+
+module = NANOMODBUS
+module-str = nanomodbus
+source "subsys/logging/Kconfig.template.log_config"
+
+config NANOMODBUS_DEBUG
+	bool "Enable nanoMODBUS core debug prints"
+	default n
+	help
+	  Defines NMBS_DEBUG, enabling stdout debug printing in nanomodbus core.
+
+comment "Roles"
+
+config NANOMODBUS_CLIENT
+	bool "Enable Modbus Client (Master) role"
+	default y
+	help
+	  Enables Modbus Client functionality and APIs.
+
+config NANOMODBUS_SERVER
+	bool "Enable Modbus Server (Slave) role"
+	default y
+	help
+	  Enables Modbus Server functionality and request dispatching.
+
+comment "Transports"
+
+config NANOMODBUS_TRANSPORT_SERIAL
+	bool "Enable Serial RTU Transport"
+	depends on SERIAL
+	default y
+	help
+	  Enables Modbus RTU communication over Zephyr UART devices.
+
+config NANOMODBUS_TRANSPORT_TCP
+	bool "Enable TCP Transport"
+	depends on NET_SOCKETS
+	default n
+	help
+	  Enables Modbus TCP communication over Zephyr BSD Sockets.
+
+comment "Server Engines"
+
+config NANOMODBUS_SERVER_RTU
+	bool "Enable Modbus RTU Server Engine"
+	depends on NANOMODBUS_SERVER && NANOMODBUS_TRANSPORT_SERIAL
+	default y
+	help
+	  Enables the event-driven RTU server engine with t3.5 character silence timer.
+
+config NANOMODBUS_SERVER_TCP
+	bool "Enable Modbus TCP Server Engine"
+	depends on NANOMODBUS_SERVER && NANOMODBUS_TRANSPORT_TCP
+	default n
+	help
+	  Enables the multi-threaded Modbus TCP server engine.
+
+if NANOMODBUS_SERVER_TCP
+
+config NANOMODBUS_SERVER_TCP_PORT
+	int "Modbus TCP Server listen port"
+	default 502
+	range 1 65535
+	help
+	  TCP port on which the Modbus server listens for incoming connections.
+
+config NANOMODBUS_SERVER_TCP_STACK_SIZE
+	int "Modbus TCP Server thread stack size"
+	default 2048
+	help
+	  Stack size in bytes for the dedicated Modbus TCP server listener thread.
+
+config NANOMODBUS_SERVER_TCP_PRIORITY
+	int "Modbus TCP Server thread priority"
+	default 7
+	help
+	  Thread priority for the Modbus TCP server listener thread.
+
+config NANOMODBUS_SERVER_TCP_TIMEOUT_MS
+	int "Modbus TCP socket receive timeout in milliseconds"
+	default 5000
+	help
+	  Timeout for socket receive operations before checking connection health.
+
+endif # NANOMODBUS_SERVER_TCP
+
+comment "Buffer and Protocol Tuning"
+
+config NANOMODBUS_BITFIELD_MAX
+	int "Maximum bitfield size for coils and discrete inputs"
+	default 2000
+	range 8 2000
+	help
+	  Maximum number of coils or discrete inputs that can be addressed in a single
+	  bitfield operation. Must be a multiple of 8.
+
+config NANOMODBUS_SERVER_RTU_RX_BUF_SIZE
+	int "RTU Server RX Ring Buffer Size"
+	depends on NANOMODBUS_SERVER_RTU
+	default 260
+	range 64 1024
+	help
+	  Size of internal buffer used to assemble incoming Modbus RTU frames.
+
+menu "Function Code Memory Pruning"
+
+config NANOMODBUS_FC_READ_COILS_DISABLED
+	bool "Disable FC 01 (Read Coils)"
+	default n
+
+config NANOMODBUS_FC_READ_DISCRETE_INPUTS_DISABLED
+	bool "Disable FC 02 (Read Discrete Inputs)"
+	default n
+
+config NANOMODBUS_FC_READ_HOLDING_REGISTERS_DISABLED
+	bool "Disable FC 03 (Read Holding Registers)"
+	default n
+
+config NANOMODBUS_FC_READ_INPUT_REGISTERS_DISABLED
+	bool "Disable FC 04 (Read Input Registers)"
+	default n
+
+config NANOMODBUS_FC_WRITE_SINGLE_COIL_DISABLED
+	bool "Disable FC 05 (Write Single Coil)"
+	default n
+
+config NANOMODBUS_FC_WRITE_SINGLE_REGISTER_DISABLED
+	bool "Disable FC 06 (Write Single Register)"
+	default n
+
+config NANOMODBUS_FC_WRITE_MULTIPLE_COILS_DISABLED
+	bool "Disable FC 15 (Write Multiple Coils)"
+	default n
+
+config NANOMODBUS_FC_WRITE_MULTIPLE_REGISTERS_DISABLED
+	bool "Disable FC 16 (Write Multiple Registers)"
+	default n
+
+config NANOMODBUS_FC_READ_FILE_RECORD_DISABLED
+	bool "Disable FC 20 (Read File Record)"
+	default y
+
+config NANOMODBUS_FC_WRITE_FILE_RECORD_DISABLED
+	bool "Disable FC 21 (Write File Record)"
+	default y
+
+config NANOMODBUS_FC_READ_WRITE_REGISTERS_DISABLED
+	bool "Disable FC 23 (Read/Write Multiple Registers)"
+	default y
+
+config NANOMODBUS_FC_READ_DEVICE_IDENTIFICATION_DISABLED
+	bool "Disable FC 43/14 (Read Device Identification)"
+	default y
+
+endmenu # Function Code Memory Pruning
+
+endif # NANOMODBUS
