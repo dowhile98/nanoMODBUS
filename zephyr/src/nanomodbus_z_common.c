@@ -25,7 +25,7 @@ int nmbs_z_error_to_errno(nmbs_error err)
     case NMBS_ERROR_INVALID_UNIT_ID:
         return -ENODEV;
     case NMBS_ERROR_INVALID_REQUEST:
-        return -EBADMSG;
+        return -EINVAL;
     case NMBS_EXCEPTION_ILLEGAL_FUNCTION:
         return -ENOSYS;
     case NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS:

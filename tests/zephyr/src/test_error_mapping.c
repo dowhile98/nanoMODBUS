@@ -21,7 +21,7 @@ ZTEST(nanomodbus_error, test_error_translation_matrix)
     zassert_equal(nmbs_z_error_to_errno(NMBS_ERROR_CRC), -EBADMSG, "-5 -> -EBADMSG");
     zassert_equal(nmbs_z_error_to_errno(NMBS_ERROR_INVALID_TCP_MBAP), -EPROTO, "-6 -> -EPROTO");
     zassert_equal(nmbs_z_error_to_errno(NMBS_ERROR_INVALID_UNIT_ID), -ENODEV, "-7 -> -ENODEV");
-    zassert_equal(nmbs_z_error_to_errno(NMBS_ERROR_INVALID_REQUEST), -EBADMSG, "-8 -> -EBADMSG");
+    zassert_equal(nmbs_z_error_to_errno(NMBS_ERROR_INVALID_REQUEST), -EINVAL, "-8 -> -EINVAL");
 
     /* Modbus Exceptions (positive values) */
     zassert_equal(nmbs_z_error_to_errno(NMBS_EXCEPTION_ILLEGAL_FUNCTION), -ENOSYS, "1 -> -ENOSYS");
