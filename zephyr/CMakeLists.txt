@@ -14,6 +14,9 @@ if(CONFIG_NANOMODBUS)
   zephyr_library_sources(${CMAKE_CURRENT_SOURCE_DIR}/../nanomodbus.c)
   zephyr_library_sources(src/nanomodbus_z_common.c)
 
+  # Role implementations
+  zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_CLIENT src/nanomodbus_z_client.c)
+
   # Transport adapters
   zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_TRANSPORT_SERIAL src/nanomodbus_z_transport_serial.c)
 
