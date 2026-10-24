@@ -17,9 +17,11 @@ if(CONFIG_NANOMODBUS)
   # Role implementations
   zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_CLIENT src/nanomodbus_z_client.c)
   zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_SERVER_RTU src/nanomodbus_z_server_rtu.c)
+  zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_SERVER_TCP src/nanomodbus_z_server_tcp.c)
 
   # Transport adapters
   zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_TRANSPORT_SERIAL src/nanomodbus_z_transport_serial.c)
+  zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_TRANSPORT_TCP src/nanomodbus_z_transport_tcp.c)
 
   # Role Disabling
   if(NOT CONFIG_NANOMODBUS_SERVER)
