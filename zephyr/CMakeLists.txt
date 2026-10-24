@@ -12,6 +12,7 @@ if(CONFIG_NANOMODBUS)
 
   # Always include the core protocol engine
   zephyr_library_sources(${CMAKE_CURRENT_SOURCE_DIR}/../nanomodbus.c)
+  zephyr_library_sources(src/nanomodbus_z_common.c)
 
   # Role Disabling
   if(NOT CONFIG_NANOMODBUS_SERVER)
