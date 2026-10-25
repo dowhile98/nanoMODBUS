@@ -8,3 +8,14 @@ build*
 /examples/cmake-build*
 /examples/build*
 doxygen
+/twister-out*
+.superpowers*
+/docs/superpowers*
+/.serial_mcp
+AGENTS.md
+.superpowers/sdd/2026-10-24-zephyr-module-integration/progress.md
+samples/client_tcp/.vscode/settings.json
+samples/server_rtu/.vscode/c_cpp_properties.json
+samples/server_rtu/.vscode/settings.json
+samples/client_tcp/.vscode/c_cpp_properties.json
+.superpowers/sdd/2026-10-24-zephyr-module-integration/progress.md
