@@ -9,4 +9,5 @@ target_sources(app PRIVATE
     src/test_client_concurrency.c
     src/test_server_rtu.c
     src/test_server_tcp.c
+    src/test_multi_instance.c
 )
