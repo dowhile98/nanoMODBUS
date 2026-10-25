@@ -1,0 +1,24 @@
+/*
+ * Copyright (c) 2026 nanoMODBUS Contributors
+ * SPDX-License-Identifier: MIT
+ *
+ * USART2 is the Modbus RTU bus on PD5 (TX) / PD6 (RX). The console uses the
+ * ST-LINK virtual COM port (USART3), so the two do not conflict.
+ *
+ * No RS-485 driver-enable is configured: the bench converter is full duplex.
+ * For a half-duplex transceiver add a `modbus-de` GPIO alias, or switch the
+ * UART to hardware DE (`de-enable` plus the RTS pin in pinctrl-0).
+ */
+
+/ {
+	aliases {
+		modbus-uart = &usart2;
+	};
+};
+
+&usart2 {
+	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};

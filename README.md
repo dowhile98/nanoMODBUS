@@ -33,6 +33,9 @@ Its main features are:
 - Platform-agnostic
     - Requires only C99 and its standard library
     - Data transport read/write functions are implemented by the user
+- Zephyr RTOS integration
+    - Available as a Zephyr module (`zephyr/`), with Kconfig, devicetree and logging support
+    - RTU over UART/RS-485 and TCP over BSD sockets, client and server
 - User-definable CRC function for better performance
 - Broadcast requests and responses
 
@@ -120,6 +123,159 @@ add_executable(your_program source_codes)
 target_link_libraries(your_program nanomodbus)
 ```
 
+## Zephyr
+
+The repository is also a Zephyr module: `zephyr/module.yml` registers it, `zephyr/Kconfig`
+exposes the `CONFIG_NANOMODBUS*` options, and the RTU/TCP client and server adapters build only
+when the matching option is enabled. The portable core (`nanomodbus.c`) stays free of Zephyr
+dependencies.
+
+The module currently lives on the `feature/zephyr-module` branch of
+`https://github.com/dowhile98/nanoMODBUS`; upstream `debevv/master` does not contain
+`zephyr/module.yml` yet. Point the manifest or `EXTRA_ZEPHYR_MODULES` at a revision that does.
+
+### As a west project
+
+```yaml
+# west.yml
+manifest:
+  remotes:
+    - name: dowhile98
+      url-base: https://github.com/dowhile98
+  projects:
+    - name: nanomodbus
+      remote: dowhile98
+      revision: feature/zephyr-module
+      path: modules/lib/nanomodbus
+  self:
+    path: app
+```
+
+```sh
+west update
+```
+
+Modules inside the west workspace are discovered automatically; no extra CMake variable is
+needed.
+
+### Out-of-tree application
+
+```sh
+west build -p always -b nucleo_h743zi . -d build \
+  -- -DEXTRA_ZEPHYR_MODULES=/absolute/path/to/nanoMODBUS
+```
+
+Or, from the application's `CMakeLists.txt`, before `find_package(Zephyr)`:
+
+```cmake
+list(APPEND ZEPHYR_EXTRA_MODULES /absolute/path/to/nanoMODBUS)
+```
+
+### `prj.conf`
+
+```conf
+# RTU client
+CONFIG_NANOMODBUS=y
+CONFIG_NANOMODBUS_CLIENT=y
+CONFIG_NANOMODBUS_TRANSPORT_SERIAL=y
+CONFIG_SERIAL=y
+CONFIG_UART_INTERRUPT_DRIVEN=y
+```
+
+```conf
+# RTU server
+CONFIG_NANOMODBUS=y
+CONFIG_NANOMODBUS_SERVER=y
+CONFIG_NANOMODBUS_SERVER_RTU=y
+CONFIG_NANOMODBUS_TRANSPORT_SERIAL=y
+CONFIG_SERIAL=y
+CONFIG_UART_INTERRUPT_DRIVEN=y
+```
+
+```conf
+# TCP client
+CONFIG_NANOMODBUS=y
+CONFIG_NANOMODBUS_CLIENT=y
+CONFIG_NANOMODBUS_TRANSPORT_TCP=y
+CONFIG_NETWORKING=y
+CONFIG_NET_SOCKETS=y
+CONFIG_NET_TCP=y
+CONFIG_NET_IPV4=y
+```
+
+```conf
+# TCP server
+CONFIG_NANOMODBUS=y
+CONFIG_NANOMODBUS_SERVER=y
+CONFIG_NANOMODBUS_SERVER_TCP=y
+CONFIG_NANOMODBUS_TRANSPORT_TCP=y
+CONFIG_NETWORKING=y
+CONFIG_NET_SOCKETS=y
+CONFIG_NET_TCP=y
+CONFIG_NET_IPV4=y
+```
+
+`CONFIG_NANOMODBUS` is disabled by default. The client and server roles default to `y` once the
+module is enabled; the serial transport defaults to `y` and TCP to `n`.
+
+### API
+
+Include the public headers with angle brackets:
+
+```c
+#include <zephyr/nanomodbus/nanomodbus_z.h>          /* client + common */
+#include <zephyr/nanomodbus/nanomodbus_z_serial.h>   /* RTU transport and server */
+#include <zephyr/nanomodbus/nanomodbus_z_tcp.h>      /* TCP transport and server */
+```
+
+Minimal RTU client:
+
+```c
+static nmbs_z_serial_transport_t transport;
+static nmbs_z_client_t client;
+
+nmbs_z_serial_transport_config_t cfg = {
+    .uart_dev = DEVICE_DT_GET(DT_ALIAS(modbus_uart)),
+    .baud_rate = 115200,
+    .parity = UART_CFG_PARITY_NONE,
+    .stop_bits = UART_CFG_STOP_BITS_1,
+    .data_bits = UART_CFG_DATA_BITS_8,
+    .de_mode = NMBS_Z_SERIAL_DE_NONE,
+    .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
+};
+
+nmbs_platform_conf platform;
+nmbs_z_serial_transport_init(&transport, &cfg, &platform);
+nmbs_z_client_init(&client, &platform);
+nmbs_z_client_set_target_address(&client, 1, K_MSEC(100));
+
+uint16_t regs[4];
+nmbs_z_client_read_holding_registers(&client, 0, 4, regs, K_MSEC(500));
+```
+
+Keep transports, clients and servers in static storage. Server objects embed their own threads
+and stacks, and a TCP client with roughly 500 bytes of locals can overflow the default 1 KB
+`main()` stack. `samples/client_tcp` sets `CONFIG_MAIN_STACK_SIZE=2048` for this reason.
+
+### Samples and tests
+
+| Sample | Description |
+| --- | --- |
+| `samples/client_rtu` | RTU client polling a slave over USART2 |
+| `samples/client_tcp` | TCP client against a configurable server IP/port |
+| `samples/server_rtu` | Event-driven RTU server with IRQ or async RX |
+| `samples/server_tcp` | TCP server on port 502 |
+| `samples/modbus_gateway` | Two RTU buses bridged to a TCP server |
+
+```sh
+west build -p always -b nucleo_h743zi samples/server_rtu -d build_server_rtu \
+  -- -DEXTRA_ZEPHYR_MODULES=$PWD
+west twister -T tests/zephyr -p native_sim --extra-args ZEPHYR_MODULES=$PWD
+```
+
+See [`docs/zephyr-getting-started.md`](docs/zephyr-getting-started.md) for devicetree/RS-485
+setup, receive modes, memory figures, the full Kconfig reference and troubleshooting.
+
 ## API reference
 
 API reference is available in the
@@ -169,12 +325,23 @@ methods.
 
 ## Tests and examples
 
-Tests and examples can be built and run on Linux with CMake:
+The portable core's tests and the Linux/Arduino/STM32/RP2040/Win32 examples can be built with
+CMake on Linux. `BUILD_TESTS` and `BUILD_EXAMPLES` default to `OFF`, so they must be enabled
+explicitly:
 
 ```sh
-mkdir build && cd build
-cmake ..
-make
+cmake -S . -B build_host -DBUILD_TESTS=ON -DBUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build_host -j
+ctest --test-dir build_host --output-on-failure
+```
+
+A bare `cmake ..` only builds the library. Some host tests use real sleeps, so the full `ctest`
+run takes about 70 seconds; that is not a hang.
+
+Zephyr tests run under Twister on `native_sim`:
+
+```sh
+west twister -T tests/zephyr -p native_sim --extra-args ZEPHYR_MODULES=$PWD
 ```
 
 Please refer to `examples/arduino/README.md` for more info about building and running Arduino

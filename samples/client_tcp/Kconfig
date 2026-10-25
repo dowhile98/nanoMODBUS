@@ -1,0 +1,28 @@
+# Copyright (c) 2026 nanoMODBUS Contributors
+# SPDX-License-Identifier: MIT
+
+mainmenu "nanoMODBUS TCP client sample"
+
+config CLIENT_TCP_SERVER_IP
+	string "Modbus TCP server address"
+	default "192.168.1.10"
+	help
+	  IPv4 (or IPv6) address of the Modbus TCP server this sample connects to.
+
+	  The board reaches the server over the network, so a loopback address
+	  such as 127.0.0.1 would point back at the board itself. Set this to the
+	  address of the host running the Modbus TCP server, for example:
+
+	    west build -p always -b nucleo_h743zi samples/client_tcp \
+	      -d build_client_tcp \
+	      -- -DCONFIG_CLIENT_TCP_SERVER_IP='"192.168.1.50"'
+
+config CLIENT_TCP_SERVER_PORT
+	int "Modbus TCP server port"
+	default 502
+	range 1 65535
+	help
+	  TCP port of the Modbus TCP server. Use a port above 1024 when the server
+	  runs as an unprivileged user on the host.
+
+source "Kconfig.zephyr"
