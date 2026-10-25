@@ -53,7 +53,7 @@ static void server_tcp_before(void *fixture)
 /* Test 1: Full round-trip read and write over Modbus TCP */
 ZTEST(nanomodbus_server_tcp, test_tcp_server_client_roundtrip)
 {
-    nmbs_z_server_tcp_t server = {0};
+    static nmbs_z_server_tcp_t server;
     nmbs_callbacks cbs = {0};
     cbs.read_holding_registers = mock_read_holding_registers;
     cbs.write_single_register = mock_write_single_register;
@@ -97,7 +97,7 @@ ZTEST(nanomodbus_server_tcp, test_tcp_server_client_roundtrip)
 /* Test 2 (Review Focus 4): Abrupt client abort mid-stream and clean server recovery */
 ZTEST(nanomodbus_server_tcp, test_tcp_server_client_abort_recovery)
 {
-    nmbs_z_server_tcp_t server = {0};
+    static nmbs_z_server_tcp_t server;
     nmbs_callbacks cbs = {0};
     cbs.read_holding_registers = mock_read_holding_registers;
 
@@ -149,7 +149,7 @@ ZTEST(nanomodbus_server_tcp, test_tcp_server_client_abort_recovery)
 /* Test 3: Graceful server shutdown */
 ZTEST(nanomodbus_server_tcp, test_tcp_server_graceful_shutdown)
 {
-    nmbs_z_server_tcp_t server = {0};
+    static nmbs_z_server_tcp_t server;
     nmbs_callbacks cbs = {0};
     cbs.read_holding_registers = mock_read_holding_registers;
 

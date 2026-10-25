@@ -115,6 +115,8 @@ typedef struct nmbs_z_serial_transport {
     struct k_spinlock rb_lock;           /**< Protects ring buffer reset against RX ISR */
     atomic_t rx_overflow;                /**< Set when a frame did not fit in rx_buffer */
     atomic_t rx_active;                  /**< IRQ/ASYNC receiver currently enabled */
+    atomic_t rx_resync_count;            /**< Frames discarded because of a > t1.5 gap */
+    uint32_t last_rx_cycles;             /**< Cycle counter of the last queued byte */
     uint8_t async_rx_buffer[2][CONFIG_NANOMODBUS_SERIAL_ASYNC_RX_BUF_SIZE];
     uint8_t async_next_buf;              /**< Buffer index to hand to the driver next */
     bool de_hw;                          /**< UART hardware driver-enable is active */
@@ -140,10 +142,13 @@ void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t 
 /**
  * @brief Initialize a Serial RTU transport instance.
  *
- * Resolves the DE strategy (hardware, GPIO or none), initializes the ring
- * buffer and synchronization primitives, calculates silence timings, and
- * populates the platform configuration. When @ref
- * nmbs_z_serial_transport_config::rx_mode is not EXTERNAL, reception is
+ * Applies the requested line settings (baud rate, parity, stop bits, data
+ * bits) to the UART when the driver supports runtime configuration, keeping
+ * the flow-control setting untouched so that a devicetree configured RS-485
+ * hardware driver-enable keeps working. The DE strategy (hardware, GPIO or
+ * none) is resolved afterwards, the ring buffer and synchronization
+ * primitives are initialized and the silence timings are calculated. When
+ * @ref nmbs_z_serial_transport_config::rx_mode is not EXTERNAL, reception is
  * started before this function returns.
  *
  * @param transport Pointer to transport context.
@@ -202,6 +207,11 @@ void nmbs_z_transport_serial_flush(nmbs_t *nmbs, void *arg);
  * May be called from ISR context. Invokes the configured receive notification
  * callback, if any.
  *
+ * In IRQ and ASYNC receive modes a gap longer than t1.5 between two calls
+ * discards the partially received frame, as required by the Modbus over
+ * serial line specification. EXTERNAL mode is exempt: there the application
+ * owns the byte timing.
+ *
  * @param transport Pointer to transport context.
  * @param data Byte buffer containing received data.
  * @param length Number of bytes to put.
@@ -211,8 +221,20 @@ int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const u
 
 #ifdef CONFIG_NANOMODBUS_SERVER_RTU
 
+#ifndef CONFIG_NANOMODBUS_SERVER_RTU_WQ_STACK_SIZE
+#define CONFIG_NANOMODBUS_SERVER_RTU_WQ_STACK_SIZE 1024
+#endif
+
+#ifndef CONFIG_NANOMODBUS_SERVER_RTU_WQ_PRIORITY
+#define CONFIG_NANOMODBUS_SERVER_RTU_WQ_PRIORITY 5
+#endif
+
 /**
  * @brief Modbus RTU Server context instance.
+ *
+ * Owns its workqueue thread stack, so an instance must be allocated in static
+ * storage (or at least must outlive the server) and needs roughly
+ * CONFIG_NANOMODBUS_SERVER_RTU_WQ_STACK_SIZE extra bytes.
  */
 typedef struct nmbs_z_server_rtu {
     nmbs_t core;
@@ -220,8 +242,12 @@ typedef struct nmbs_z_server_rtu {
     nmbs_z_serial_transport_t transport;
     struct k_timer silence_timer;
     struct k_work work;
+    struct k_work_q work_q;              /**< Dedicated queue for request processing */
+    K_KERNEL_STACK_MEMBER(work_q_stack, CONFIG_NANOMODBUS_SERVER_RTU_WQ_STACK_SIZE);
     uint8_t server_address;
-    bool running;
+    atomic_t running;                    /**< Server engine accepts requests */
+    atomic_t rx_pending;                 /**< Bytes arrived during the last poll */
+    atomic_t init_magic;                 /**< Guards against double initialization */
 } nmbs_z_server_rtu_t;
 
 /**
@@ -231,11 +257,15 @@ typedef struct nmbs_z_server_rtu {
  * installs its own receive notification callback, so the application must not
  * also register a UART callback on the same device.
  *
+ * @p server must be zero-initialized static storage: it embeds a workqueue
+ * thread stack and stays referenced by the kernel after this call returns.
+ *
  * @param server Pointer to server instance.
  * @param config Serial configuration.
  * @param callbacks Modbus request handling callbacks.
  * @param server_address Modbus RTU slave address (1-247).
- * @return 0 on success, negative errno on failure.
+ * @return 0 on success, -EALREADY if the instance was already initialized,
+ *         other negative errno on failure.
  */
 int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
                            const nmbs_z_serial_transport_config_t *config,
@@ -245,6 +275,9 @@ int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
 /**
  * @brief Start the Modbus RTU Server engine.
  *
+ * Re-enables reception after nmbs_z_server_rtu_stop(); the workqueue thread is
+ * created once by nmbs_z_server_rtu_init() and is not restarted here.
+ *
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.
  */
@@ -253,8 +286,10 @@ int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t *server);
 /**
  * @brief Stop the Modbus RTU Server engine.
  *
- * Stops the silence timer, cancels any pending work on the workqueue and
- * disables IRQ/ASYNC reception.
+ * Stops the silence timer, cancels any pending work on the workqueue, disables
+ * IRQ/ASYNC reception and discards a partially received request. The
+ * workqueue thread keeps running so that nmbs_z_server_rtu_start() can be
+ * called again.
  *
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.

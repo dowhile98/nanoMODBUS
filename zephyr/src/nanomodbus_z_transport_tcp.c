@@ -9,6 +9,39 @@
 
 LOG_MODULE_REGISTER(nmbs_tcp, CONFIG_NANOMODBUS_LOG_LEVEL);
 
+/*
+ * Client-side socket options: disable Nagle (Modbus exchanges are small and
+ * latency sensitive) and optionally enable keepalive so a vanished peer is
+ * detected instead of blocking the client forever.
+ */
+static void tcp_apply_socket_options(int sock)
+{
+    int opt = 1;
+    int ret = zsock_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
+    if (ret < 0) {
+        LOG_WRN("TCP_NODELAY setsockopt failed: %d", errno);
+    }
+
+#if defined(CONFIG_NANOMODBUS_TCP_KEEPALIVE)
+    ret = zsock_setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
+    if (ret < 0) {
+        LOG_WRN("SO_KEEPALIVE setsockopt failed: %d", errno);
+        return;
+    }
+
+    int idle = CONFIG_NANOMODBUS_TCP_KEEPIDLE_S;
+    int intvl = CONFIG_NANOMODBUS_TCP_KEEPINTVL_S;
+    int cnt = CONFIG_NANOMODBUS_TCP_KEEPCNT;
+
+    if (zsock_setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle)) < 0 ||
+        zsock_setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl)) < 0 ||
+        zsock_setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt)) < 0) {
+        LOG_WRN("TCP keepalive tuning failed: %d", errno);
+    }
+#endif /* CONFIG_NANOMODBUS_TCP_KEEPALIVE */
+}
+
 int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
                                  const char *server_ip,
                                  uint16_t port,
@@ -57,6 +90,8 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
         zsock_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     }
 
+    tcp_apply_socket_options(sock);
+
     ret = zsock_connect(sock, (struct sockaddr *)&transport->server_addr, transport->addr_len);
     if (ret < 0) {
         int err = -errno;
@@ -76,6 +111,43 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
     return 0;
 }
 
+/*
+ * Wait until `events` is reported on the socket, honouring the byte timeout.
+ *
+ * Returns 1 when the socket is ready, 0 on timeout and a negative errno on
+ * error.
+ */
+static int tcp_wait_for(int sock, short events, int32_t timeout_ms)
+{
+    struct zsock_pollfd pfd = {
+        .fd = sock,
+        .events = events,
+    };
+
+    int pret = zsock_poll(&pfd, 1, (timeout_ms < 0) ? -1 : timeout_ms);
+
+    if (pret < 0) {
+        return (errno == EINTR) ? -EINTR : -errno;
+    }
+
+    if (pret == 0) {
+        return 0;
+    }
+
+    if (pfd.revents & ZSOCK_POLLNVAL) {
+        return -EBADF;
+    }
+
+    if (!(pfd.revents & events)) {
+        if (pfd.revents & (ZSOCK_POLLERR | ZSOCK_POLLHUP)) {
+            return -ECONNRESET;
+        }
+        return -EIO;
+    }
+
+    return 1;
+}
+
 int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
 {
     if (!arg || !buf) {
@@ -92,41 +164,50 @@ int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_tim
     }
 
     uint16_t recvd = 0;
+
     while (recvd < count) {
+        /* The byte timeout applies to the gap between two bytes, so the
+         * deadline restarts every time data arrives.
+         */
         if (byte_timeout_ms >= 0) {
-            struct zsock_pollfd pfd = {
-                .fd = transport->sock,
-                .events = ZSOCK_POLLIN,
-            };
-            int pret = zsock_poll(&pfd, 1, byte_timeout_ms);
-            if (pret < 0) {
-                return -errno;
+            int ret = tcp_wait_for(transport->sock, ZSOCK_POLLIN, byte_timeout_ms);
+
+            if (ret == -EINTR) {
+                continue;
             }
-            if (pret == 0) {
-                /* Timeout waiting for byte */
-                break;
+            if (ret < 0) {
+                return ret;
             }
-            if ((pfd.revents & (ZSOCK_POLLERR | ZSOCK_POLLHUP | ZSOCK_POLLNVAL)) &&
-                !(pfd.revents & ZSOCK_POLLIN)) {
-                return -ECONNRESET;
+            if (ret == 0) {
+                break; /* Inter-byte timeout */
             }
         }
 
-        int flags = (byte_timeout_ms == 0) ? MSG_DONTWAIT : 0;
-        ssize_t ret = zsock_recv(transport->sock, buf + recvd, count - recvd, flags);
+        ssize_t ret = zsock_recv(transport->sock, buf + recvd, count - recvd, MSG_DONTWAIT);
+
         if (ret < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT) {
-                break;
+                if (byte_timeout_ms == 0) {
+                    break;
+                }
+                continue;
             }
             return -errno;
         }
+
         if (ret == 0) {
-            /* Disconnected / closed by peer */
+            /* Peer closed the connection. A clean close after a complete
+             * message is not an error; a close mid-message is.
+             */
             if (recvd == 0) {
                 return -ECONNRESET;
             }
             break;
         }
+
         recvd += (uint16_t)ret;
     }
 
@@ -135,8 +216,6 @@ int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_tim
 
 int32_t nmbs_z_transport_tcp_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
 {
-    ARG_UNUSED(byte_timeout_ms);
-
     if (!arg || !buf) {
         return -EINVAL;
     }
@@ -151,14 +230,41 @@ int32_t nmbs_z_transport_tcp_write(const uint8_t *buf, uint16_t count, int32_t b
     }
 
     uint16_t sent = 0;
+
     while (sent < count) {
-        ssize_t ret = zsock_send(transport->sock, buf + sent, count - sent, 0);
+        if (byte_timeout_ms >= 0) {
+            int ret = tcp_wait_for(transport->sock, ZSOCK_POLLOUT, byte_timeout_ms);
+
+            if (ret == -EINTR) {
+                continue;
+            }
+            if (ret < 0) {
+                return ret;
+            }
+            if (ret == 0) {
+                break; /* Socket stayed full for longer than the timeout */
+            }
+        }
+
+        ssize_t ret = zsock_send(transport->sock, buf + sent, count - sent, MSG_DONTWAIT);
+
         if (ret < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT) {
+                if (byte_timeout_ms == 0) {
+                    break;
+                }
+                continue;
+            }
             return -errno;
         }
+
         if (ret == 0) {
             return -ECONNRESET;
         }
+
         sent += (uint16_t)ret;
     }
 

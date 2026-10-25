@@ -53,6 +53,15 @@ config NANOMODBUS_CLIENT_DEFAULT_BYTE_TIMEOUT_MS
 	  nmbs_z_client_init(); can be changed at runtime with
 	  nmbs_z_client_set_timeouts().
 
+config NANOMODBUS_CLIENT_TCP_TIMEOUT_MS
+	int "Default Modbus TCP client socket timeout (ms)"
+	depends on NANOMODBUS_TRANSPORT_TCP
+	default 5000
+	range 1 600000
+	help
+	  Timeout used by nmbs_z_tcp_transport_connect() for the TCP
+	  handshake and for the socket send/receive watchdog.
+
 endif # NANOMODBUS_CLIENT
 
 comment "Transports"
@@ -92,6 +101,38 @@ config NANOMODBUS_SERIAL_ASYNC_RX_BUF_SIZE
 	  Size of each of the two buffers handed to the asynchronous UART API
 	  (DMA or interrupt backed) when NMBS_Z_SERIAL_RX_ASYNC is selected.
 
+if NANOMODBUS_TRANSPORT_TCP
+
+config NANOMODBUS_TCP_KEEPALIVE
+	bool "Enable TCP keepalive on client transports"
+	depends on NET_TCP_KEEPALIVE
+	default n
+	help
+	  Enables SO_KEEPALIVE on sockets created by
+	  nmbs_z_tcp_transport_connect() so that a peer that silently
+	  disappeared is eventually reported as a transport error instead of
+	  leaving the client blocked forever.
+
+config NANOMODBUS_TCP_KEEPIDLE_S
+	int "TCP keepalive idle time before the first probe (s)"
+	depends on NANOMODBUS_TCP_KEEPALIVE
+	default 60
+	range 1 7200
+
+config NANOMODBUS_TCP_KEEPINTVL_S
+	int "TCP keepalive interval between probes (s)"
+	depends on NANOMODBUS_TCP_KEEPALIVE
+	default 10
+	range 1 7200
+
+config NANOMODBUS_TCP_KEEPCNT
+	int "TCP keepalive probe count before dropping the connection"
+	depends on NANOMODBUS_TCP_KEEPALIVE
+	default 3
+	range 1 100
+
+endif # NANOMODBUS_TRANSPORT_TCP
+
 comment "Server Engines"
 
 config NANOMODBUS_SERVER_RTU
@@ -110,6 +151,24 @@ config NANOMODBUS_SERVER_RTU_BYTE_TIMEOUT_MS
 	help
 	  Maximum gap between two bytes of a request. The RTU server uses the
 	  same value for its first-byte read timeout and its byte timeout.
+
+config NANOMODBUS_SERVER_RTU_WQ_STACK_SIZE
+	int "RTU server workqueue stack size"
+	default 1024
+	range 512 8192
+	help
+	  Stack size in bytes for the per-instance RTU server workqueue thread.
+	  The request is parsed on this thread, so it must be large enough for
+	  the nanoMODBUS core plus the application callbacks.
+
+config NANOMODBUS_SERVER_RTU_WQ_PRIORITY
+	int "RTU server workqueue thread priority"
+	default 5
+	range -16 15
+	help
+	  Priority of the per-instance RTU server workqueue thread. It must be
+	  preemptible, otherwise the t3.5 silence timer cannot interrupt it and
+	  the response would stall the receive path.
 
 endif # NANOMODBUS_SERVER_RTU
 

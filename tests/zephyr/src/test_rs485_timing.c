@@ -88,8 +88,41 @@ static void mock_uart_poll_out(const struct device *dev, unsigned char out_char)
     mock_de_tracker.bytes_written++;
 }
 
+/* Mock UART line settings, used to verify that the transport applies the
+ * requested baud/parity/stop bits without dropping hardware RS-485 DE.
+ */
+static struct {
+    struct uart_config cfg;
+    uint32_t configure_calls;
+} mock_uart_line = {
+    .cfg = {
+        .baudrate = 115200,
+        .parity = UART_CFG_PARITY_NONE,
+        .stop_bits = UART_CFG_STOP_BITS_1,
+        .data_bits = UART_CFG_DATA_BITS_8,
+        .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
+    },
+};
+
+static int mock_uart_config_get(const struct device *dev, struct uart_config *cfg)
+{
+    ARG_UNUSED(dev);
+    *cfg = mock_uart_line.cfg;
+    return 0;
+}
+
+static int mock_uart_configure(const struct device *dev, const struct uart_config *cfg)
+{
+    ARG_UNUSED(dev);
+    mock_uart_line.cfg = *cfg;
+    mock_uart_line.configure_calls++;
+    return 0;
+}
+
 static DEVICE_API(uart, mock_uart_api) = {
     .poll_out = mock_uart_poll_out,
+    .config_get = mock_uart_config_get,
+    .configure = mock_uart_configure,
 };
 
 DEVICE_DEFINE(mock_uart_dev, "mock_uart", mock_dev_init, NULL,
@@ -188,6 +221,7 @@ ZTEST(nanomodbus_serial, test_rs485_de_pin_drain_timing)
         .baud_rate = 115200,
         .de_pre_delay_us = 20,
         .de_post_delay_us = 20,
+        .de_mode = NMBS_Z_SERIAL_DE_GPIO,
     };
     nmbs_platform_conf p_conf;
     int ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
@@ -217,6 +251,7 @@ ZTEST(nanomodbus_serial, test_rs485_write_without_de_gpio)
         .baud_rate = 115200,
         .de_pre_delay_us = 0,
         .de_post_delay_us = 0,
+        .de_mode = NMBS_Z_SERIAL_DE_NONE,
     };
     nmbs_platform_conf p_conf;
     int ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
@@ -231,7 +266,8 @@ ZTEST(nanomodbus_serial, test_rs485_write_without_de_gpio)
 
 /* Serial read and flush */
 ZTEST(nanomodbus_serial, test_serial_read_and_flush)
-{    nmbs_z_serial_transport_t transport;
+{
+    nmbs_z_serial_transport_t transport;
     nmbs_z_serial_transport_config_t cfg = {
         .uart_dev = NULL,
         .de_gpio = { .port = NULL },
@@ -304,6 +340,9 @@ ZTEST(nanomodbus_serial, test_serial_explicit_hardware_de_skips_gpio)
 {
     reset_mock_tracker();
 
+    /* A UART that reports RS-485 flow control is using hardware DE. */
+    mock_uart_line.cfg.flow_ctrl = UART_CFG_FLOW_CTRL_RS485;
+
     nmbs_z_serial_transport_t transport;
     nmbs_z_serial_transport_config_t cfg = {
         .uart_dev = DEVICE_GET(mock_uart_dev),
@@ -317,7 +356,7 @@ ZTEST(nanomodbus_serial, test_serial_explicit_hardware_de_skips_gpio)
     };
     nmbs_platform_conf p_conf;
     int ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
-    zassert_equal(ret, 0, "explicit hardware DE must be accepted when the driver cannot report config");
+    zassert_equal(ret, 0, "explicit hardware DE must be accepted when the UART reports RS-485");
     zassert_true(transport.de_hw, "hardware DE flag set");
     zassert_false(transport.de_gpio, "GPIO DE flag cleared");
 
@@ -325,6 +364,123 @@ ZTEST(nanomodbus_serial, test_serial_explicit_hardware_de_skips_gpio)
     zassert_equal(p_conf.write(payload, sizeof(payload), 1000, &transport), sizeof(payload),
                   "write succeeds");
     zassert_equal(mock_de_tracker.de_assert_count, 0, "hardware DE must not drive the GPIO");
+
+    /* Requesting hardware DE on a UART without it must be refused, not
+     * silently downgraded to GPIO.
+     */
+    mock_uart_line.cfg.flow_ctrl = UART_CFG_FLOW_CTRL_NONE;
+    zassert_equal(nmbs_z_serial_transport_init(&transport, &cfg, &p_conf), -ENOTSUP,
+                  "explicit hardware DE on a non RS-485 UART must fail");
+}
+
+/* UART line settings are applied without dropping hardware RS-485 DE */
+ZTEST(nanomodbus_serial, test_serial_line_config_preserves_hardware_de)
+{
+    reset_mock_tracker();
+    mock_uart_line.cfg.baudrate = 115200;
+    mock_uart_line.cfg.parity = UART_CFG_PARITY_NONE;
+    mock_uart_line.cfg.stop_bits = UART_CFG_STOP_BITS_1;
+    mock_uart_line.cfg.data_bits = UART_CFG_DATA_BITS_8;
+    mock_uart_line.cfg.flow_ctrl = UART_CFG_FLOW_CTRL_RS485;
+    mock_uart_line.configure_calls = 0;
+
+    nmbs_z_serial_transport_t transport;
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = DEVICE_GET(mock_uart_dev),
+        .baud_rate = 9600,
+        .parity = UART_CFG_PARITY_EVEN,
+        .stop_bits = UART_CFG_STOP_BITS_2,
+        .data_bits = UART_CFG_DATA_BITS_8,
+        .de_mode = NMBS_Z_SERIAL_DE_AUTO,
+        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+    };
+    nmbs_platform_conf p_conf;
+
+    int ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
+    zassert_equal(ret, 0, "init must succeed");
+
+    zassert_equal(mock_uart_line.configure_calls, 1, "line settings must be applied once");
+    zassert_equal(mock_uart_line.cfg.baudrate, 9600, "baud rate must be applied");
+    zassert_equal(mock_uart_line.cfg.parity, UART_CFG_PARITY_EVEN, "parity must be applied");
+    zassert_equal(mock_uart_line.cfg.stop_bits, UART_CFG_STOP_BITS_2, "stop bits must be applied");
+    zassert_equal(mock_uart_line.cfg.flow_ctrl, UART_CFG_FLOW_CTRL_RS485,
+                  "reconfiguring must not disable hardware RS-485 DE");
+    zassert_true(transport.de_hw, "hardware DE must stay selected after reconfiguration");
+    zassert_false(transport.de_gpio, "no GPIO DE when hardware DE is available");
+
+    /* Restore the default mock so other tests are unaffected. */
+    mock_uart_line.cfg.flow_ctrl = UART_CFG_FLOW_CTRL_NONE;
+    mock_uart_line.cfg.baudrate = 115200;
+    mock_uart_line.cfg.parity = UART_CFG_PARITY_NONE;
+    mock_uart_line.cfg.stop_bits = UART_CFG_STOP_BITS_1;
+}
+
+/* Matching line settings must not trigger a needless reconfiguration */
+ZTEST(nanomodbus_serial, test_serial_line_config_skipped_when_equal)
+{
+    mock_uart_line.cfg.baudrate = 115200;
+    mock_uart_line.cfg.parity = UART_CFG_PARITY_NONE;
+    mock_uart_line.cfg.stop_bits = UART_CFG_STOP_BITS_1;
+    mock_uart_line.cfg.data_bits = UART_CFG_DATA_BITS_8;
+    mock_uart_line.cfg.flow_ctrl = UART_CFG_FLOW_CTRL_NONE;
+    mock_uart_line.configure_calls = 0;
+
+    nmbs_z_serial_transport_t transport;
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = DEVICE_GET(mock_uart_dev),
+        .baud_rate = 115200,
+        .parity = UART_CFG_PARITY_NONE,
+        .stop_bits = UART_CFG_STOP_BITS_1,
+        .data_bits = UART_CFG_DATA_BITS_8,
+        .de_mode = NMBS_Z_SERIAL_DE_NONE,
+        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+    };
+    nmbs_platform_conf p_conf;
+
+    zassert_equal(nmbs_z_serial_transport_init(&transport, &cfg, &p_conf), 0, "init must succeed");
+    zassert_equal(mock_uart_line.configure_calls, 0, "no reconfiguration needed when settings match");
+}
+
+/* A gap longer than t1.5 between two callbacks drops the partial frame */
+ZTEST(nanomodbus_serial, test_serial_t1_5_gap_discards_partial_frame)
+{
+    nmbs_z_serial_transport_t transport;
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = NULL,
+        .baud_rate = 115200,
+        .de_mode = NMBS_Z_SERIAL_DE_NONE,
+        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+    };
+    nmbs_platform_conf p_conf;
+
+    zassert_equal(nmbs_z_serial_transport_init(&transport, &cfg, &p_conf), 0, "init must succeed");
+
+    /* EXTERNAL mode owns the byte timing, so no gap handling is applied. */
+    uint8_t first[] = {0x01, 0x03};
+    uint8_t second[] = {0x00, 0x00};
+
+    zassert_equal(nmbs_z_serial_transport_rx_put(&transport, first, sizeof(first)), sizeof(first), "first put");
+    k_busy_wait(2000);
+    zassert_equal(nmbs_z_serial_transport_rx_put(&transport, second, sizeof(second)), sizeof(second), "second put");
+    zassert_equal(ring_buf_size_get(&transport.rx_rb), 4, "EXTERNAL mode must not drop anything");
+    zassert_equal(atomic_get(&transport.rx_resync_count), 0, "no resync in EXTERNAL mode");
+
+    /* Simulate the IRQ/ASYNC path, which the RTU server installs. */
+    p_conf.flush(NULL, &transport);
+    transport.cfg.rx_mode = NMBS_Z_SERIAL_RX_IRQ;
+    atomic_set(&transport.rx_resync_count, 0);
+
+    uint8_t rx[8] = {0};
+
+    zassert_equal(nmbs_z_serial_transport_rx_put(&transport, first, sizeof(first)), sizeof(first), "new frame start");
+    k_busy_wait(2000); /* > t1.5 (750 us at 115200 bps) */
+    zassert_equal(nmbs_z_serial_transport_rx_put(&transport, second, sizeof(second)), sizeof(second), "after gap");
+
+    zassert_equal(atomic_get(&transport.rx_resync_count), 1, "partial frame must be discarded once");
+    zassert_equal(ring_buf_size_get(&transport.rx_rb), sizeof(second),
+                  "only the bytes received after the gap are kept");
+    zassert_equal(p_conf.read(rx, sizeof(rx), 0, &transport), sizeof(second), "reader only sees the new frame");
+    zassert_mem_equal(rx, second, sizeof(second), "buffered bytes belong to the new frame");
 }
 
 ZTEST_SUITE(nanomodbus_serial, NULL, NULL, NULL, NULL, NULL);

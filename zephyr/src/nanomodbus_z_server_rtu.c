@@ -11,22 +11,52 @@
 
 LOG_MODULE_REGISTER(nmbs_server_rtu, CONFIG_NANOMODBUS_LOG_LEVEL);
 
+#define NMBS_Z_SERVER_RTU_INIT_MAGIC 0x4E4D4253 /* 'NMBS' */
+
+static const struct k_work_queue_config rtu_work_q_config = {
+    .name = "nmbs_rtu_wq",
+};
+
 static void on_silence_timer_expired(struct k_timer *timer)
 {
     nmbs_z_server_rtu_t *server = CONTAINER_OF(timer, nmbs_z_server_rtu_t, silence_timer);
-    if (server->running) {
-        k_work_submit(&server->work);
+
+    if (!atomic_get(&server->running)) {
+        return;
+    }
+
+    /* A t3.5 expiry always means "a frame may be complete". If the work item is
+     * still queued or running, the extra poll it performs anyway will pick the
+     * bytes up, so a 0 return is not an error.
+     */
+    int ret = k_work_submit_to_queue(&server->work_q, &server->work);
+
+    if (ret < 0) {
+        LOG_WRN("Failed to submit RTU request work (%d)", ret);
     }
 }
 
 static void on_server_work(struct k_work *work)
 {
     nmbs_z_server_rtu_t *server = CONTAINER_OF(work, nmbs_z_server_rtu_t, work);
-    if (!server->running) {
+
+    if (!atomic_get(&server->running)) {
         return;
     }
 
+    atomic_set(&server->rx_pending, 0);
     (void)nmbs_server_poll(&server->core);
+
+    /* If more bytes arrived while the request was being handled, run again
+     * instead of waiting for the next t3.5 expiry.
+     */
+    if (atomic_get(&server->rx_pending) && atomic_get(&server->running)) {
+        int ret = k_work_submit_to_queue(&server->work_q, &server->work);
+
+        if (ret < 0) {
+            LOG_WRN("Failed to resubmit RTU request work (%d)", ret);
+        }
+    }
 }
 
 static void on_transport_rx(nmbs_z_serial_transport_t *transport, const uint8_t *data, size_t len,
@@ -38,10 +68,11 @@ static void on_transport_rx(nmbs_z_serial_transport_t *transport, const uint8_t 
 
     nmbs_z_server_rtu_t *server = (nmbs_z_server_rtu_t *)user_data;
 
-    if (server == NULL || !server->running) {
+    if (server == NULL || !atomic_get(&server->running)) {
         return;
     }
 
+    atomic_set(&server->rx_pending, 1);
     k_timer_start(&server->silence_timer, K_USEC(server->transport.t3_5_us), K_NO_WAIT);
 }
 
@@ -56,6 +87,10 @@ int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
 
     if (server_address == 0 || server_address > 247) {
         return -EINVAL;
+    }
+
+    if (atomic_get(&server->init_magic) == NMBS_Z_SERVER_RTU_INIT_MAGIC) {
+        return -EALREADY;
     }
 
     memset(server, 0, sizeof(*server));
@@ -94,16 +129,19 @@ int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
 
     k_timer_init(&server->silence_timer, on_silence_timer_expired, NULL);
     k_work_init(&server->work, on_server_work);
+    k_work_queue_start(&server->work_q, server->work_q_stack, K_KERNEL_STACK_SIZEOF(server->work_q_stack),
+                       CONFIG_NANOMODBUS_SERVER_RTU_WQ_PRIORITY, &rtu_work_q_config);
 
+    atomic_set(&server->running, 0);
+    atomic_set(&server->rx_pending, 0);
     server->transport.cfg.rx_mode = config->rx_mode;
     server->transport.cfg.rx_cb = on_transport_rx;
     server->transport.cfg.rx_cb_user_data = server;
+    atomic_set(&server->init_magic, NMBS_Z_SERVER_RTU_INIT_MAGIC);
 
-    server->running = true;
-
-    ret = nmbs_z_serial_transport_start_rx(&server->transport);
+    ret = nmbs_z_server_rtu_start(server);
     if (ret != 0) {
-        server->running = false;
+        atomic_set(&server->running, 0);
         return ret;
     }
 
@@ -116,12 +154,18 @@ int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t *server)
         return -EINVAL;
     }
 
+    if (atomic_get(&server->init_magic) != NMBS_Z_SERVER_RTU_INIT_MAGIC) {
+        return -EINVAL;
+    }
+
+    atomic_set(&server->running, 1);
+
     int ret = nmbs_z_serial_transport_start_rx(&server->transport);
     if (ret != 0) {
+        atomic_set(&server->running, 0);
         return ret;
     }
 
-    server->running = true;
     return 0;
 }
 
@@ -131,20 +175,21 @@ int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t *server)
         return -EINVAL;
     }
 
-    server->running = false;
+    atomic_set(&server->running, 0);
     k_timer_stop(&server->silence_timer);
 
     struct k_work_sync sync;
     (void)k_work_cancel_sync(&server->work, &sync);
 
     (void)nmbs_z_serial_transport_stop_rx(&server->transport);
+    nmbs_z_transport_serial_flush(NULL, &server->transport);
 
     return 0;
 }
 
 void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t *server, const uint8_t *data, uint32_t length)
 {
-    if (server == NULL || data == NULL || !server->running) {
+    if (server == NULL || data == NULL || !atomic_get(&server->running)) {
         return;
     }
 

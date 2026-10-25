@@ -29,7 +29,8 @@ int main(void)
     while (1) {
         if (!connected) {
             LOG_INF("Connecting to Modbus TCP Server at %s:%u...", SERVER_IP, SERVER_PORT);
-            int ret = nmbs_z_tcp_transport_connect(&transport, SERVER_IP, SERVER_PORT, 2000, &platform);
+            int ret = nmbs_z_tcp_transport_connect(&transport, SERVER_IP, SERVER_PORT,
+                                                   CONFIG_NANOMODBUS_CLIENT_TCP_TIMEOUT_MS, &platform);
             if (ret != 0) {
                 LOG_WRN("Connection failed (%d). Retrying in 2 seconds...", ret);
                 k_sleep(K_MSEC(2000));

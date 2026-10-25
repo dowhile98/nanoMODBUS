@@ -89,6 +89,8 @@ int nmbs_z_tcp_transport_close(nmbs_z_tcp_transport_t *transport);
 
 /**
  * @brief Modbus TCP Server context instance.
+ *
+ * Embeds the listener thread stack, so instances must live in static storage.
  */
 typedef struct nmbs_z_server_tcp {
     nmbs_t core;
@@ -99,8 +101,7 @@ typedef struct nmbs_z_server_tcp {
     atomic_t running;
     atomic_t thread_active;
     struct k_thread thread;
-    k_thread_stack_t *stack;
-    size_t stack_size;
+    K_KERNEL_STACK_MEMBER(thread_stack, CONFIG_NANOMODBUS_SERVER_TCP_STACK_SIZE);
     int priority;
     struct k_sem stop_sem;
     struct k_sem ready_sem;

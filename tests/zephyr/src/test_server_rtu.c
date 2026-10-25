@@ -118,7 +118,7 @@ ZTEST(nanomodbus_server_rtu, test_full_rtu_requests_reception_and_response)
 {
     reset_server_tracker();
 
-    nmbs_z_server_rtu_t server;
+    static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
         .uart_dev = DEVICE_GET(mock_server_uart_dev),
         .baud_rate = 115200,
@@ -208,7 +208,7 @@ ZTEST(nanomodbus_server_rtu, test_fragmented_character_silence_reset)
 {
     reset_server_tracker();
 
-    nmbs_z_server_rtu_t server;
+    static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
         .uart_dev = DEVICE_GET(mock_server_uart_dev),
         .baud_rate = 115200, /* t3.5 = 1750 us */
@@ -265,7 +265,7 @@ ZTEST(nanomodbus_server_rtu, test_server_stop_and_start)
 {
     reset_server_tracker();
 
-    nmbs_z_server_rtu_t server;
+    static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
         .uart_dev = DEVICE_GET(mock_server_uart_dev),
         .baud_rate = 115200,
@@ -279,10 +279,14 @@ ZTEST(nanomodbus_server_rtu, test_server_stop_and_start)
     int ret = nmbs_z_server_rtu_init(&server, &cfg, &cbs, 1);
     zassert_equal(ret, 0, "Server init must succeed");
 
+    /* Re-initializing a live instance would leak the workqueue thread */
+    zassert_equal(nmbs_z_server_rtu_init(&server, &cfg, &cbs, 1), -EALREADY,
+                  "Second init on the same instance must be rejected");
+
     /* Stop the server */
     ret = nmbs_z_server_rtu_stop(&server);
     zassert_equal(ret, 0, "Server stop must return 0");
-    zassert_false(server.running, "Server running flag must be false");
+    zassert_false(atomic_get(&server.running), "Server running flag must be false");
 
     /* Feed bytes while stopped */
     uint8_t req[8] = {1, 3, 0x00, 0x01, 0x00, 0x01, 0, 0};
@@ -301,7 +305,7 @@ ZTEST(nanomodbus_server_rtu, test_server_stop_and_start)
     /* Restart the server */
     ret = nmbs_z_server_rtu_start(&server);
     zassert_equal(ret, 0, "Server start must return 0");
-    zassert_true(server.running, "Server running flag must be true");
+    zassert_true(atomic_get(&server.running), "Server running flag must be true");
 
     /* Now feed request and verify it is processed */
     for (int i = 0; i < sizeof(req); i++) {
@@ -317,7 +321,7 @@ ZTEST(nanomodbus_server_rtu, test_server_stop_and_start)
 /* Parameter validation tests */
 ZTEST(nanomodbus_server_rtu, test_server_init_parameter_validation)
 {
-    nmbs_z_server_rtu_t server;
+    static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
         .uart_dev = NULL,
         .baud_rate = 115200,
@@ -336,6 +340,9 @@ ZTEST(nanomodbus_server_rtu, test_server_init_parameter_validation)
     /* Start / Stop NULL guards */
     zassert_equal(nmbs_z_server_rtu_start(NULL), -EINVAL, "NULL start");
     zassert_equal(nmbs_z_server_rtu_stop(NULL), -EINVAL, "NULL stop");
+
+    /* Operating on a never-initialized instance must be rejected */
+    zassert_equal(nmbs_z_server_rtu_start(&server), -EINVAL, "start before init");
 }
 
 ZTEST_SUITE(nanomodbus_server_rtu, NULL, NULL, NULL, NULL, NULL);

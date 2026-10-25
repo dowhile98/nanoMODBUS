@@ -5,6 +5,7 @@
 
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/time_units.h>
 #include <string.h>
 
 LOG_MODULE_REGISTER(nmbs_serial, CONFIG_NANOMODBUS_LOG_LEVEL);
@@ -30,6 +31,55 @@ void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t 
         *t1_5_us = 750;
         *t3_5_us = 1750;
     }
+}
+
+/*
+ * Apply the requested line settings to the UART, leaving the flow-control
+ * mode untouched. On STM32 (and any driver following the same convention)
+ * UART_CFG_FLOW_CTRL_RS485 is what keeps the hardware driver-enable
+ * (de-enable) active, so overwriting it would silently disable RS-485 DE.
+ */
+static int serial_apply_line_config(nmbs_z_serial_transport_t *transport)
+{
+    const struct device *dev = transport->cfg.uart_dev;
+    struct uart_config uart_cfg;
+    int ret = uart_config_get(dev, &uart_cfg);
+
+    if (ret != 0) {
+        /* Runtime reconfiguration is optional; the devicetree settings then
+         * stay in force.
+         */
+        LOG_DBG("UART line configuration not applied (%d), keeping devicetree settings", ret);
+        return 0;
+    }
+
+    /* Nothing to change? Then avoid touching a possibly busy peripheral. */
+    if (uart_cfg.baudrate == transport->cfg.baud_rate &&
+        uart_cfg.parity == (enum uart_config_parity)transport->cfg.parity &&
+        uart_cfg.stop_bits == (enum uart_config_stop_bits)transport->cfg.stop_bits &&
+        uart_cfg.data_bits == (enum uart_config_data_bits)transport->cfg.data_bits) {
+        return 0;
+    }
+
+    uart_cfg.baudrate = transport->cfg.baud_rate;
+    uart_cfg.parity = (enum uart_config_parity)transport->cfg.parity;
+    uart_cfg.stop_bits = (enum uart_config_stop_bits)transport->cfg.stop_bits;
+    uart_cfg.data_bits = (enum uart_config_data_bits)transport->cfg.data_bits;
+
+    ret = uart_configure(dev, &uart_cfg);
+    if (ret == -ENOSYS || ret == -ENOTSUP) {
+        LOG_DBG("UART driver cannot change line settings (%d), keeping devicetree settings", ret);
+        return 0;
+    }
+    if (ret != 0) {
+        LOG_ERR("Failed to configure UART (%d)", ret);
+        return ret;
+    }
+
+    LOG_DBG("UART configured: %u bps, parity %u, %u stop bits, %u data bits", transport->cfg.baud_rate,
+            transport->cfg.parity, transport->cfg.stop_bits, transport->cfg.data_bits);
+
+    return 0;
 }
 
 static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
@@ -296,8 +346,19 @@ int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
     k_sem_init(&transport->rx_sem, 0, K_SEM_MAX_LIMIT);
     atomic_set(&transport->rx_active, 0);
     atomic_set(&transport->rx_overflow, 0);
+    atomic_set(&transport->rx_resync_count, 0);
+    transport->last_rx_cycles = k_cycle_get_32();
 
-    int ret = serial_resolve_de(transport);
+    int ret = 0;
+
+    if (transport->cfg.uart_dev != NULL) {
+        ret = serial_apply_line_config(transport);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    ret = serial_resolve_de(transport);
     if (ret != 0) {
         return ret;
     }
@@ -455,6 +516,11 @@ void nmbs_z_transport_serial_flush(nmbs_t *nmbs, void *arg)
 
     ring_buf_reset(&transport->rx_rb);
     k_spin_unlock(&transport->rb_lock, key);
+
+    /* k_sem_reset()/k_sem_give() are kept outside rb_lock: they may reschedule
+     * and must never be called with a spinlock held. The reader always
+     * re-checks the ring before sleeping, so a lost wakeup cannot lose data.
+     */
     k_sem_reset(&transport->rx_sem);
     atomic_set(&transport->rx_overflow, 0);
 
@@ -475,8 +541,30 @@ int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const u
         return 0;
     }
 
+    uint32_t now = k_cycle_get_32();
+    bool track_gap = (transport->cfg.rx_mode != NMBS_Z_SERIAL_RX_EXTERNAL) && transport->t1_5_us > 0;
+    uint32_t elapsed_us = 0;
+    bool resynced = false;
+    uint32_t put;
+
     k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
-    uint32_t put = ring_buf_put(&transport->rx_rb, data, length);
+
+    if (track_gap) {
+        elapsed_us = k_cyc_to_us_floor32((uint32_t)(now - transport->last_rx_cycles));
+
+        if (elapsed_us > transport->t1_5_us && ring_buf_size_get(&transport->rx_rb) > 0) {
+            /* Modbus over serial line: any gap longer than 1.5 characters
+             * ends the frame, so whatever is still buffered belongs to an
+             * incomplete frame and must be discarded.
+             */
+            ring_buf_reset(&transport->rx_rb);
+            atomic_inc(&transport->rx_resync_count);
+            resynced = true;
+        }
+    }
+
+    transport->last_rx_cycles = now;
+    put = ring_buf_put(&transport->rx_rb, data, length);
 
     k_spin_unlock(&transport->rb_lock, key);
 
@@ -486,6 +574,10 @@ int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const u
 
     if (put > 0) {
         k_sem_give(&transport->rx_sem);
+    }
+
+    if (resynced) {
+        LOG_DBG("Discarded partial frame after %u us of silence", elapsed_us);
     }
 
     if (transport->cfg.rx_cb != NULL && put > 0) {

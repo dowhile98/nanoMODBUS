@@ -143,8 +143,6 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
     k_sem_give(&server->stop_sem);
 }
 
-static K_THREAD_STACK_DEFINE(default_tcp_server_stack, CONFIG_NANOMODBUS_SERVER_TCP_STACK_SIZE);
-
 int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
                            const nmbs_callbacks *callbacks,
                            uint16_t port)
@@ -164,8 +162,6 @@ int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
     atomic_set(&server->thread_active, 0);
     k_sem_init(&server->stop_sem, 0, 1);
     k_sem_init(&server->ready_sem, 0, 1);
-    server->stack = default_tcp_server_stack;
-    server->stack_size = K_THREAD_STACK_SIZEOF(default_tcp_server_stack);
     server->priority = CONFIG_NANOMODBUS_SERVER_TCP_PRIORITY;
 
     nmbs_platform_conf platform_conf;
@@ -217,8 +213,8 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
     atomic_set(&server->thread_active, 1);
 
     k_thread_create(&server->thread,
-                    server->stack,
-                    server->stack_size,
+                    server->thread_stack,
+                    K_KERNEL_STACK_SIZEOF(server->thread_stack),
                     tcp_server_thread_fn,
                     server, NULL, NULL,
                     server->priority,

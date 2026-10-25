@@ -132,6 +132,25 @@ static const char *rx_mode_name(nmbs_z_serial_rx_mode_t mode)
     }
 }
 
+/*
+ * Pick the best receive path the UART actually supports. Async RX needs both
+ * the async API and DMA channels in devicetree; IRQ mode needs the
+ * interrupt-driven API. Anything else falls back to application polling.
+ */
+static nmbs_z_serial_rx_mode_t select_rx_mode(void)
+{
+#if defined(CONFIG_UART_ASYNC_API) && DT_NODE_EXISTS(MODBUS_UART_NODE)
+    if (DT_NODE_HAS_PROP(MODBUS_UART_NODE, dmas)) {
+        return NMBS_Z_SERIAL_RX_ASYNC;
+    }
+#endif
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
+    return NMBS_Z_SERIAL_RX_IRQ;
+#else
+    return NMBS_Z_SERIAL_RX_EXTERNAL;
+#endif
+}
+
 int main(void)
 {
     LOG_INF("nanoMODBUS RTU Server Sample Application Starting...");
@@ -158,13 +177,7 @@ int main(void)
         .stop_bits = UART_CFG_STOP_BITS_1,
         .data_bits = UART_CFG_DATA_BITS_8,
         .de_mode = NMBS_Z_SERIAL_DE_AUTO,
-#if defined(CONFIG_UART_ASYNC_API)
-        .rx_mode = NMBS_Z_SERIAL_RX_ASYNC,
-#elif defined(CONFIG_UART_INTERRUPT_DRIVEN)
-        .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
-#else
-        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
-#endif
+        .rx_mode = select_rx_mode(),
     };
 #if DT_HAS_ALIAS(modbus_de)
     config.de_gpio = (struct gpio_dt_spec)GPIO_DT_SPEC_GET(DT_ALIAS(modbus_de), gpios);
@@ -178,27 +191,10 @@ int main(void)
         .write_single_coil = handle_write_single_coil,
     };
 
+    /* Static storage: the instance owns a workqueue thread stack. */
     static nmbs_z_server_rtu_t server;
-    int ret = -ENOTSUP;
 
-    /* Prefer async/DMA, then IRQ, then application-driven polling. Each
-     * fallback only triggers when the UART driver lacks the previous mode.
-     */
-    const nmbs_z_serial_rx_mode_t modes[] = {
-        NMBS_Z_SERIAL_RX_ASYNC,
-        NMBS_Z_SERIAL_RX_IRQ,
-        NMBS_Z_SERIAL_RX_EXTERNAL,
-    };
-
-    for (size_t i = 0; i < ARRAY_SIZE(modes); i++) {
-        config.rx_mode = modes[i];
-        ret = nmbs_z_server_rtu_init(&server, &config, &cbs, 1 /* RTU slave address */);
-        if (ret == 0) {
-            break;
-        }
-        LOG_WRN("RTU receive mode %s unavailable (%d), trying next mode", rx_mode_name(modes[i]), ret);
-    }
-
+    int ret = nmbs_z_server_rtu_init(&server, &config, &cbs, 1 /* RTU slave address */);
     if (ret != 0) {
         LOG_ERR("Failed to initialize RTU Server: %d", ret);
         return ret;
