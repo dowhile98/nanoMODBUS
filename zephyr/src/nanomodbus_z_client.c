@@ -35,14 +35,38 @@ int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transp
 
     k_mutex_init(&client->lock);
     client->platform = *transport;
+    client->read_timeout_ms = CONFIG_NANOMODBUS_CLIENT_DEFAULT_READ_TIMEOUT_MS;
+    client->byte_timeout_ms = CONFIG_NANOMODBUS_CLIENT_DEFAULT_BYTE_TIMEOUT_MS;
 
     nmbs_error err = nmbs_client_create(&client->core, &client->platform);
     if (err != NMBS_ERROR_NONE) {
         LOG_ERR("Client create failed: %d", err);
     } else {
+        nmbs_set_read_timeout(&client->core, client->read_timeout_ms);
+        nmbs_set_byte_timeout(&client->core, client->byte_timeout_ms);
         LOG_DBG("Client initialized successfully");
     }
     return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_set_timeouts(nmbs_z_client_t *client, int32_t read_timeout_ms, int32_t byte_timeout_ms)
+{
+    if (client == NULL) {
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, K_FOREVER);
+    if (ret != 0) {
+        return ret;
+    }
+
+    client->read_timeout_ms = read_timeout_ms;
+    client->byte_timeout_ms = byte_timeout_ms;
+    nmbs_set_read_timeout(&client->core, read_timeout_ms);
+    nmbs_set_byte_timeout(&client->core, byte_timeout_ms);
+
+    k_mutex_unlock(&client->lock);
+    return 0;
 }
 
 int nmbs_z_client_set_target_address(nmbs_z_client_t *client, uint8_t unit_id, k_timeout_t timeout)

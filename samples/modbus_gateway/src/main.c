@@ -207,6 +207,8 @@ int main(void)
     nmbs_z_serial_transport_config_t cfg1 = {
         .uart_dev = (uart1_dev && device_is_ready(uart1_dev)) ? uart1_dev : NULL,
         .baud_rate = 115200,
+        .de_mode = NMBS_Z_SERIAL_DE_NONE,
+        .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
     };
     nmbs_platform_conf plat1;
     nmbs_z_serial_transport_init(&transport_rtu1, &cfg1, &plat1);
@@ -221,6 +223,8 @@ int main(void)
     nmbs_z_serial_transport_config_t cfg2 = {
         .uart_dev = (uart2_dev && device_is_ready(uart2_dev)) ? uart2_dev : NULL,
         .baud_rate = 115200,
+        .de_mode = NMBS_Z_SERIAL_DE_NONE,
+        .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
     };
     nmbs_platform_conf plat2;
     nmbs_z_serial_transport_init(&transport_rtu2, &cfg2, &plat2);

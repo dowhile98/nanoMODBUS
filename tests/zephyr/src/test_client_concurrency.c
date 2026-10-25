@@ -431,4 +431,37 @@ ZTEST(nanomodbus_client, test_client_lock_contention_timeout)
     zassert_equal(reg_val, 0x5555, "Register value mismatch");
 }
 
+ZTEST(nanomodbus_client, test_client_timeout_configuration)
+{
+    nmbs_z_client_t client;
+    nmbs_platform_conf platform;
+
+    nmbs_platform_conf_create(&platform);
+    platform.transport = NMBS_TRANSPORT_RTU;
+    platform.read = mock_transport_read;
+    platform.write = mock_transport_write;
+
+    int ret = nmbs_z_client_init(&client, &platform);
+    zassert_equal(ret, 0, "Client init failed: %d", ret);
+
+    zassert_equal(client.read_timeout_ms, CONFIG_NANOMODBUS_CLIENT_DEFAULT_READ_TIMEOUT_MS,
+                  "Default read timeout not applied");
+    zassert_equal(client.byte_timeout_ms, CONFIG_NANOMODBUS_CLIENT_DEFAULT_BYTE_TIMEOUT_MS,
+                  "Default byte timeout not applied");
+    zassert_equal(client.core.read_timeout_ms, CONFIG_NANOMODBUS_CLIENT_DEFAULT_READ_TIMEOUT_MS,
+                  "Core read timeout not applied");
+    zassert_equal(client.core.byte_timeout_ms, CONFIG_NANOMODBUS_CLIENT_DEFAULT_BYTE_TIMEOUT_MS,
+                  "Core byte timeout not applied");
+
+    ret = nmbs_z_client_set_timeouts(&client, 250, 25);
+    zassert_equal(ret, 0, "set_timeouts failed: %d", ret);
+    zassert_equal(client.read_timeout_ms, 250, "Read timeout not updated");
+    zassert_equal(client.byte_timeout_ms, 25, "Byte timeout not updated");
+    zassert_equal(client.core.read_timeout_ms, 250, "Core read timeout not updated");
+    zassert_equal(client.core.byte_timeout_ms, 25, "Core byte timeout not updated");
+
+    ret = nmbs_z_client_set_timeouts(NULL, 1, 1);
+    zassert_equal(ret, -EINVAL, "NULL client must be rejected");
+}
+
 ZTEST_SUITE(nanomodbus_client, NULL, NULL, test_client_setup, NULL, NULL);

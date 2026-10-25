@@ -23,6 +23,7 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
         LOG_ERR("Failed to create listen socket: %d", errno);
         atomic_set(&server->running, 0);
         k_sem_give(&server->ready_sem);
+        k_sem_give(&server->stop_sem);
         return;
     }
 
@@ -45,16 +46,18 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
         server->listen_sock = -1;
         atomic_set(&server->running, 0);
         k_sem_give(&server->ready_sem);
+        k_sem_give(&server->stop_sem);
         return;
     }
 
-    ret = zsock_listen(server->listen_sock, 1);
+    ret = zsock_listen(server->listen_sock, CONFIG_NANOMODBUS_SERVER_TCP_BACKLOG);
     if (ret < 0) {
         LOG_ERR("Failed to listen on socket: %d", errno);
         zsock_close(server->listen_sock);
         server->listen_sock = -1;
         atomic_set(&server->running, 0);
         k_sem_give(&server->ready_sem);
+        k_sem_give(&server->stop_sem);
         return;
     }
 
@@ -103,13 +106,16 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
             /* Request loop with client */
             while (atomic_get(&server->running)) {
                 nmbs_error err = nmbs_server_poll(&server->core);
-                if (err != NMBS_ERROR_NONE) {
-                    /* Review Focus 4: If client disconnects or aborts unexpectedly,
-                     * close client socket and immediately return to accept loop.
+
+                if (err == NMBS_ERROR_NONE || err == NMBS_ERROR_TIMEOUT) {
+                    /* Idle connection, or an incomplete frame that the core
+                     * already discarded. Keep the connection open.
                      */
-                    LOG_DBG("Client disconnected or error (%d), returning to accept", err);
-                    break;
+                    continue;
                 }
+
+                LOG_DBG("Client disconnected or error (%d), returning to accept", err);
+                break;
             }
 
             /* Clean up client socket */
@@ -121,12 +127,19 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
         }
     }
 
-    /* Thread terminating: close listening socket */
+    /* Thread terminating: close sockets owned by this thread */
+    if (server->client_sock >= 0) {
+        zsock_close(server->client_sock);
+        server->client_sock = -1;
+        server->client_transport.sock = -1;
+    }
+
     if (server->listen_sock >= 0) {
         zsock_close(server->listen_sock);
         server->listen_sock = -1;
     }
 
+    atomic_set(&server->thread_active, 0);
     k_sem_give(&server->stop_sem);
 }
 
@@ -148,6 +161,7 @@ int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
     server->client_sock = -1;
     server->client_transport.sock = -1;
     atomic_set(&server->running, 0);
+    atomic_set(&server->thread_active, 0);
     k_sem_init(&server->stop_sem, 0, 1);
     k_sem_init(&server->ready_sem, 0, 1);
     server->stack = default_tcp_server_stack;
@@ -167,8 +181,8 @@ int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
         return nmbs_z_error_to_errno(err);
     }
 
-    nmbs_set_read_timeout(&server->core, 200);
-    nmbs_set_byte_timeout(&server->core, 200);
+    nmbs_set_read_timeout(&server->core, CONFIG_NANOMODBUS_SERVER_TCP_TIMEOUT_MS);
+    nmbs_set_byte_timeout(&server->core, CONFIG_NANOMODBUS_SERVER_TCP_TIMEOUT_MS);
 
     return 0;
 }
@@ -181,23 +195,26 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
         return -EINVAL;
     }
 
+    if (atomic_get(&server->running) || atomic_get(&server->thread_active)) {
+        return -EALREADY;
+    }
+
     if (callbacks != NULL || port != 0) {
         int ret = nmbs_z_server_tcp_init(server, callbacks, port);
         if (ret != 0) {
             return ret;
         }
-    } else {
-        if (atomic_get(&server->running)) {
-            return -EALREADY;
-        }
-        if (server->port == 0) {
-            return -EINVAL;
-        }
+    } else if (server->port == 0) {
+        return -EINVAL;
     }
 
-    atomic_set(&server->running, 1);
+    if (!atomic_cas(&server->running, 0, 1)) {
+        return -EALREADY;
+    }
+
     k_sem_reset(&server->stop_sem);
     k_sem_reset(&server->ready_sem);
+    atomic_set(&server->thread_active, 1);
 
     k_thread_create(&server->thread,
                     server->stack,
@@ -212,7 +229,13 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
 
     int ret = k_sem_take(&server->ready_sem, K_MSEC(2000));
     if (ret != 0 || !atomic_get(&server->running)) {
-        nmbs_z_server_tcp_stop(server);
+        atomic_set(&server->running, 0);
+        /* The thread always gives stop_sem when it exits, including the
+         * bind/listen failure paths.
+         */
+        (void)k_sem_take(&server->stop_sem, K_MSEC(2000));
+        (void)k_thread_join(&server->thread, K_MSEC(1000));
+        atomic_set(&server->thread_active, 0);
         return (ret != 0) ? -ETIMEDOUT : -EIO;
     }
 
@@ -225,26 +248,23 @@ int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server)
         return -EINVAL;
     }
 
-    if (!atomic_cas(&server->running, 1, 0)) {
-        /* Already stopped */
+    if (!atomic_get(&server->running) && !atomic_get(&server->thread_active)) {
         return 0;
     }
 
-    /* Close sockets to wake up any blocking zsock_poll or recv */
+    atomic_set(&server->running, 0);
+
+    /* Wake up blocking poll/recv calls. The server thread remains the only
+     * owner that closes the descriptors.
+     */
     if (server->client_sock >= 0) {
-        int cs = server->client_sock;
-        server->client_sock = -1;
-        server->client_transport.sock = -1;
-        zsock_close(cs);
+        (void)zsock_shutdown(server->client_sock, SHUT_RDWR);
     }
 
     if (server->listen_sock >= 0) {
-        int ls = server->listen_sock;
-        server->listen_sock = -1;
-        zsock_close(ls);
+        (void)zsock_shutdown(server->listen_sock, SHUT_RDWR);
     }
 
-    /* Wait for server thread to exit cleanly */
     int ret = k_sem_take(&server->stop_sem, K_MSEC(2000));
     if (ret != 0) {
         LOG_WRN("TCP server thread did not stop in time, forcing termination");
@@ -252,7 +272,8 @@ int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server)
         k_sem_give(&server->stop_sem);
     }
 
-    k_thread_join(&server->thread, K_MSEC(1000));
+    (void)k_thread_join(&server->thread, K_MSEC(1000));
+    atomic_set(&server->thread_active, 0);
 
     return 0;
 }

@@ -31,6 +31,30 @@ config NANOMODBUS_SERVER
 	help
 	  Enables Modbus Server functionality and request dispatching.
 
+if NANOMODBUS_CLIENT
+
+comment "Client Timeouts"
+
+config NANOMODBUS_CLIENT_DEFAULT_READ_TIMEOUT_MS
+	int "Default client response timeout (ms)"
+	default 1000
+	range 1 600000
+	help
+	  Time the client waits for the first byte of a response before
+	  returning a timeout. Applied by nmbs_z_client_init(); can be changed
+	  at runtime with nmbs_z_client_set_timeouts().
+
+config NANOMODBUS_CLIENT_DEFAULT_BYTE_TIMEOUT_MS
+	int "Default client inter-byte timeout (ms)"
+	default 100
+	range 1 600000
+	help
+	  Maximum gap between two bytes of a response. Applied by
+	  nmbs_z_client_init(); can be changed at runtime with
+	  nmbs_z_client_set_timeouts().
+
+endif # NANOMODBUS_CLIENT
+
 comment "Transports"
 
 config NANOMODBUS_TRANSPORT_SERIAL
@@ -42,10 +66,31 @@ config NANOMODBUS_TRANSPORT_SERIAL
 
 config NANOMODBUS_TRANSPORT_TCP
 	bool "Enable TCP Transport"
-	depends on NET_SOCKETS
+	depends on NET_SOCKETS && NET_TCP
+	select NET_CONTEXT_RCVTIMEO
+	select NET_CONTEXT_SNDTIMEO
 	default n
 	help
 	  Enables Modbus TCP communication over Zephyr BSD Sockets.
+
+config NANOMODBUS_SERIAL_RX_BUF_SIZE
+	int "Serial RTU receive ring buffer size"
+	depends on NANOMODBUS_TRANSPORT_SERIAL
+	default 260
+	range 256 1024
+	help
+	  Size of the internal buffer used to assemble incoming Modbus RTU
+	  frames. A Modbus RTU ADU is at most 256 bytes, so values below 256
+	  cannot hold a maximum-size frame.
+
+config NANOMODBUS_SERIAL_ASYNC_RX_BUF_SIZE
+	int "Serial RTU asynchronous RX buffer size"
+	depends on NANOMODBUS_TRANSPORT_SERIAL
+	default 128
+	range 32 512
+	help
+	  Size of each of the two buffers handed to the asynchronous UART API
+	  (DMA or interrupt backed) when NMBS_Z_SERIAL_RX_ASYNC is selected.
 
 comment "Server Engines"
 
@@ -56,21 +101,27 @@ config NANOMODBUS_SERVER_RTU
 	help
 	  Enables the event-driven RTU server engine with t3.5 character silence timer.
 
+if NANOMODBUS_SERVER_RTU
+
+config NANOMODBUS_SERVER_RTU_BYTE_TIMEOUT_MS
+	int "RTU server inter-byte timeout (ms)"
+	default 100
+	range 1 10000
+	help
+	  Maximum gap between two bytes of a request. The RTU server uses the
+	  same value for its first-byte read timeout and its byte timeout.
+
+endif # NANOMODBUS_SERVER_RTU
+
 config NANOMODBUS_SERVER_TCP
 	bool "Enable Modbus TCP Server Engine"
 	depends on NANOMODBUS_SERVER && NANOMODBUS_TRANSPORT_TCP
 	default n
 	help
-	  Enables the multi-threaded Modbus TCP server engine.
+	  Enables the Modbus TCP server engine. The server accepts one client
+	  at a time; additional connections wait in the listen backlog.
 
 if NANOMODBUS_SERVER_TCP
-
-config NANOMODBUS_SERVER_TCP_PORT
-	int "Modbus TCP Server listen port"
-	default 502
-	range 1 65535
-	help
-	  TCP port on which the Modbus server listens for incoming connections.
 
 config NANOMODBUS_SERVER_TCP_STACK_SIZE
 	int "Modbus TCP Server thread stack size"
@@ -85,10 +136,21 @@ config NANOMODBUS_SERVER_TCP_PRIORITY
 	  Thread priority for the Modbus TCP server listener thread.
 
 config NANOMODBUS_SERVER_TCP_TIMEOUT_MS
-	int "Modbus TCP socket receive timeout in milliseconds"
-	default 5000
+	int "Modbus TCP server idle poll timeout in milliseconds"
+	default 200
+	range 50 60000
 	help
-	  Timeout for socket receive operations before checking connection health.
+	  Time the TCP server waits for the first byte of a request before
+	  cycling to check the connection and shutdown state. It is also used as
+	  the inter-byte timeout for requests.
+
+config NANOMODBUS_SERVER_TCP_BACKLOG
+	int "Modbus TCP listen backlog"
+	default 4
+	range 1 16
+	help
+	  Number of pending client connections the network stack may queue.
+	  The server still processes one accepted client at a time.
 
 endif # NANOMODBUS_SERVER_TCP
 
@@ -101,14 +163,6 @@ config NANOMODBUS_BITFIELD_MAX
 	help
 	  Maximum number of coils or discrete inputs that can be addressed in a single
 	  bitfield operation. Must be a multiple of 8.
-
-config NANOMODBUS_SERVER_RTU_RX_BUF_SIZE
-	int "RTU Server RX Ring Buffer Size"
-	depends on NANOMODBUS_SERVER_RTU
-	default 260
-	range 64 1024
-	help
-	  Size of internal buffer used to assemble incoming Modbus RTU frames.
 
 menu "Function Code Memory Pruning"
 

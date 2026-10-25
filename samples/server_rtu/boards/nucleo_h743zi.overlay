@@ -1,23 +1,41 @@
 /*
  * Copyright (c) 2026 nanoMODBUS Contributors
  * SPDX-License-Identifier: MIT
+ *
+ * USART2 on the Nucleo-H743ZI is wired to the ST-LINK virtual COM port.
+ * PD4 is USART2_RTS (AF7) and drives the RS-485 transceiver DE pin in
+ * hardware, so no software GPIO DE is needed on this board.
+ *
+ * The two DMA channels let the transport use NMBS_Z_SERIAL_RX_ASYNC.
  */
 
 / {
 	aliases {
 		modbus-uart = &usart2;
-		modbus-de = &rs485_de;
-	};
-
-	rs485_de: rs485_de {
-		compatible = "vnd,phandle-holder", "vnd,gpio-device";
-		gpios = <&gpiod 4 GPIO_ACTIVE_HIGH>;
 	};
 };
 
 &usart2 {
-	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
+	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6 &usart2_rts_pd4>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
+	de-enable;
+	de-assert-time = <4>;
+	de-deassert-time = <4>;
+	dmas = <&dmamux1 2 44 STM32_DMA_PERIPH_TX>,
+	       <&dmamux1 3 43 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
+	status = "okay";
+};
+
+&dma1 {
+	status = "okay";
+};
+
+&dma2 {
+	status = "okay";
+};
+
+&dmamux1 {
 	status = "okay";
 };

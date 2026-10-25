@@ -5,6 +5,7 @@
 
 #include <zephyr/ztest.h>
 #include <errno.h>
+#include <string.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
@@ -230,8 +231,7 @@ ZTEST(nanomodbus_serial, test_rs485_write_without_de_gpio)
 
 /* Serial read and flush */
 ZTEST(nanomodbus_serial, test_serial_read_and_flush)
-{
-    nmbs_z_serial_transport_t transport;
+{    nmbs_z_serial_transport_t transport;
     nmbs_z_serial_transport_config_t cfg = {
         .uart_dev = NULL,
         .de_gpio = { .port = NULL },
@@ -260,6 +260,71 @@ ZTEST(nanomodbus_serial, test_serial_read_and_flush)
     p_conf.flush(NULL, &transport);
     n = p_conf.read(rx_buf, sizeof(rx_buf), 0, &transport);
     zassert_equal(n, 0, "Read after flush returns 0");
+}
+
+/* Transport receive path used by IRQ/ASYNC callbacks */
+ZTEST(nanomodbus_serial, test_serial_rx_put_and_overflow)
+{
+    nmbs_z_serial_transport_t transport;
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = NULL,
+        .de_mode = NMBS_Z_SERIAL_DE_NONE,
+        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+        .baud_rate = 115200,
+    };
+    nmbs_platform_conf p_conf;
+    int ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
+    zassert_equal(ret, 0, "init must succeed");
+
+    uint8_t payload[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x02};
+    zassert_equal(nmbs_z_serial_transport_rx_put(&transport, payload, sizeof(payload)),
+                  sizeof(payload), "rx_put stores all bytes");
+
+    uint8_t rx[sizeof(payload)] = {0};
+    zassert_equal(p_conf.read(rx, sizeof(rx), 10, &transport), sizeof(rx), "read returns queued bytes");
+    zassert_mem_equal(rx, payload, sizeof(payload), "queued bytes match");
+
+    /* A frame that does not fit must be reported as a transport overflow. */
+    uint8_t big[CONFIG_NANOMODBUS_SERIAL_RX_BUF_SIZE + 1];
+
+    memset(big, 0xA5, sizeof(big));
+    zassert_equal(nmbs_z_serial_transport_rx_put(&transport, big, sizeof(big)),
+                  CONFIG_NANOMODBUS_SERIAL_RX_BUF_SIZE, "ring accepts only its capacity");
+    zassert_equal(p_conf.read(rx, sizeof(rx), 0, &transport), -EOVERFLOW,
+                  "overflow is surfaced to the protocol layer");
+
+    /* After the overflow error the transport is usable again. */
+    zassert_equal(nmbs_z_serial_transport_rx_put(&transport, payload, sizeof(payload)),
+                  sizeof(payload), "transport recovers after overflow");
+    zassert_equal(p_conf.read(rx, sizeof(rx), 10, &transport), sizeof(rx), "read works after overflow");
+}
+
+/* Hardware DE without runtime UART configuration must not touch a GPIO */
+ZTEST(nanomodbus_serial, test_serial_explicit_hardware_de_skips_gpio)
+{
+    reset_mock_tracker();
+
+    nmbs_z_serial_transport_t transport;
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = DEVICE_GET(mock_uart_dev),
+        .de_gpio = {
+            .port = DEVICE_GET(mock_gpio_dev),
+            .pin = 2,
+            .dt_flags = GPIO_ACTIVE_HIGH,
+        },
+        .baud_rate = 115200,
+        .de_mode = NMBS_Z_SERIAL_DE_HARDWARE,
+    };
+    nmbs_platform_conf p_conf;
+    int ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
+    zassert_equal(ret, 0, "explicit hardware DE must be accepted when the driver cannot report config");
+    zassert_true(transport.de_hw, "hardware DE flag set");
+    zassert_false(transport.de_gpio, "GPIO DE flag cleared");
+
+    uint8_t payload[] = {0x01, 0x06, 0x00, 0x01, 0x00, 0x03, 0x98, 0x0B};
+    zassert_equal(p_conf.write(payload, sizeof(payload), 1000, &transport), sizeof(payload),
+                  "write succeeds");
+    zassert_equal(mock_de_tracker.de_assert_count, 0, "hardware DE must not drive the GPIO");
 }
 
 ZTEST_SUITE(nanomodbus_serial, NULL, NULL, NULL, NULL, NULL);

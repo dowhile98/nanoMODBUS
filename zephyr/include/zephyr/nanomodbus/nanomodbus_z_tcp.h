@@ -97,6 +97,7 @@ typedef struct nmbs_z_server_tcp {
     int client_sock;
     uint16_t port;
     atomic_t running;
+    atomic_t thread_active;
     struct k_thread thread;
     k_thread_stack_t *stack;
     size_t stack_size;
@@ -109,7 +110,12 @@ typedef struct nmbs_z_server_tcp {
 /**
  * @brief Initialize Modbus TCP Server context.
  *
- * @param server Pointer to uninitialized server context.
+ * The server serves one client connection at a time. Additional clients are
+ * accepted only after the current connection is closed.
+ *
+ * @param server Pointer to uninitialized server context. It must remain valid
+ *               and must not be placed on a stack that is destroyed while the
+ *               server runs.
  * @param callbacks Modbus request handling callbacks.
  * @param port TCP port to listen on.
  * @return 0 on success, negative errno on failure.

@@ -174,16 +174,34 @@ typedef struct nmbs_z_client {
     struct k_mutex lock;             /**< Mutex protecting core against concurrent callers */
     nmbs_t core;                     /**< Core nanoMODBUS client instance */
     nmbs_platform_conf platform;     /**< Platform transport configuration */
+    int32_t read_timeout_ms;         /**< First-byte/response timeout in milliseconds */
+    int32_t byte_timeout_ms;         /**< Inter-byte timeout in milliseconds */
 } nmbs_z_client_t;
 
 /**
  * @brief Initialize a thread-safe nanoMODBUS client instance.
+ *
+ * Read and byte timeouts are initialized from
+ * CONFIG_NANOMODBUS_CLIENT_DEFAULT_READ_TIMEOUT_MS and
+ * CONFIG_NANOMODBUS_CLIENT_DEFAULT_BYTE_TIMEOUT_MS.
  *
  * @param client Pointer to uninitialized nmbs_z_client structure.
  * @param transport Platform transport configuration.
  * @return 0 on success, negative errno on failure.
  */
 int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transport);
+
+/**
+ * @brief Set the client response and inter-byte timeouts.
+ *
+ * @param client Pointer to client instance.
+ * @param read_timeout_ms Time to wait for the first byte of a response.
+ *                        Negative values mean infinite.
+ * @param byte_timeout_ms Maximum gap between two response bytes.
+ *                        Negative values mean infinite.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_set_timeouts(nmbs_z_client_t *client, int32_t read_timeout_ms, int32_t byte_timeout_ms);
 
 /**
  * @brief Set the target server RTU address for subsequent client requests.

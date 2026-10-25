@@ -109,7 +109,7 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value,
     return NMBS_ERROR_NONE;
 }
 
-#if DT_NODE_EXISTS(DT_ALIAS(modbus_uart))
+#if DT_HAS_ALIAS(modbus_uart)
 #define MODBUS_UART_NODE DT_ALIAS(modbus_uart)
 #elif DT_NODE_EXISTS(DT_CHOSEN(zephyr_console))
 #define MODBUS_UART_NODE DT_CHOSEN(zephyr_console)
@@ -119,20 +119,18 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value,
 #define MODBUS_UART_NODE DT_INVALID_NODE
 #endif
 
-#ifdef CONFIG_UART_INTERRUPT_DRIVEN
-static void uart_irq_cb(const struct device *dev, void *user_data)
+static const char *rx_mode_name(nmbs_z_serial_rx_mode_t mode)
 {
-    nmbs_z_server_rtu_t *server = (nmbs_z_server_rtu_t *)user_data;
-    uart_irq_update(dev);
-    while (uart_irq_rx_ready(dev)) {
-        uint8_t byte;
-        if (uart_fifo_read(dev, &byte, 1) <= 0) {
-            break;
-        }
-        nmbs_z_server_rtu_rx_byte(server, byte);
+    switch (mode) {
+    case NMBS_Z_SERIAL_RX_IRQ:
+        return "IRQ";
+    case NMBS_Z_SERIAL_RX_ASYNC:
+        return "async/DMA";
+    case NMBS_Z_SERIAL_RX_EXTERNAL:
+    default:
+        return "external polling";
     }
 }
-#endif
 
 int main(void)
 {
@@ -156,8 +154,19 @@ int main(void)
         .baud_rate = 115200,
         .de_pre_delay_us = 0,
         .de_post_delay_us = 0,
+        .parity = UART_CFG_PARITY_NONE,
+        .stop_bits = UART_CFG_STOP_BITS_1,
+        .data_bits = UART_CFG_DATA_BITS_8,
+        .de_mode = NMBS_Z_SERIAL_DE_AUTO,
+#if defined(CONFIG_UART_ASYNC_API)
+        .rx_mode = NMBS_Z_SERIAL_RX_ASYNC,
+#elif defined(CONFIG_UART_INTERRUPT_DRIVEN)
+        .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
+#else
+        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+#endif
     };
-#if DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(modbus_de))
+#if DT_HAS_ALIAS(modbus_de)
     config.de_gpio = (struct gpio_dt_spec)GPIO_DT_SPEC_GET(DT_ALIAS(modbus_de), gpios);
 #endif
 
@@ -170,7 +179,26 @@ int main(void)
     };
 
     static nmbs_z_server_rtu_t server;
-    int ret = nmbs_z_server_rtu_init(&server, &config, &cbs, 1 /* RTU slave address */);
+    int ret = -ENOTSUP;
+
+    /* Prefer async/DMA, then IRQ, then application-driven polling. Each
+     * fallback only triggers when the UART driver lacks the previous mode.
+     */
+    const nmbs_z_serial_rx_mode_t modes[] = {
+        NMBS_Z_SERIAL_RX_ASYNC,
+        NMBS_Z_SERIAL_RX_IRQ,
+        NMBS_Z_SERIAL_RX_EXTERNAL,
+    };
+
+    for (size_t i = 0; i < ARRAY_SIZE(modes); i++) {
+        config.rx_mode = modes[i];
+        ret = nmbs_z_server_rtu_init(&server, &config, &cbs, 1 /* RTU slave address */);
+        if (ret == 0) {
+            break;
+        }
+        LOG_WRN("RTU receive mode %s unavailable (%d), trying next mode", rx_mode_name(modes[i]), ret);
+    }
+
     if (ret != 0) {
         LOG_ERR("Failed to initialize RTU Server: %d", ret);
         return ret;
@@ -182,18 +210,9 @@ int main(void)
         return ret;
     }
 
-    LOG_INF("Modbus RTU Server started successfully (Slave ID 1, 115200 bps)");
+    LOG_INF("Modbus RTU Server started (slave ID 1, 115200 bps, RX %s)", rx_mode_name(config.rx_mode));
 
-    if (uart_dev && device_is_ready(uart_dev)) {
-#ifdef CONFIG_UART_INTERRUPT_DRIVEN
-        if (uart_irq_callback_user_data_set(uart_dev, uart_irq_cb, &server) == 0) {
-            uart_irq_rx_enable(uart_dev);
-            LOG_INF("Interrupt-driven UART reception enabled");
-            while (1) {
-                k_sleep(K_SECONDS(1));
-            }
-        }
-#endif
+    if (config.rx_mode == NMBS_Z_SERIAL_RX_EXTERNAL && uart_dev && device_is_ready(uart_dev)) {
         LOG_INF("Polling UART for incoming Modbus frames...");
         while (1) {
             unsigned char c;
@@ -203,10 +222,10 @@ int main(void)
                 k_sleep(K_MSEC(1));
             }
         }
-    } else {
-        while (1) {
-            k_sleep(K_SECONDS(1));
-        }
+    }
+
+    while (1) {
+        k_sleep(K_SECONDS(1));
     }
 
     return 0;

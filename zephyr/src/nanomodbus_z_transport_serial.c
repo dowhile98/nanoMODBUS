@@ -9,6 +9,8 @@
 
 LOG_MODULE_REGISTER(nmbs_serial, CONFIG_NANOMODBUS_LOG_LEVEL);
 
+#define NMBS_SERIAL_CHAR_BITS 11U
+
 void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t *t3_5_us)
 {
     if (!t1_5_us || !t3_5_us) {
@@ -30,6 +32,232 @@ void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t 
     }
 }
 
+static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
+{
+    const nmbs_z_serial_transport_config_t *config = &transport->cfg;
+    bool hw_de = false;
+    bool gpio_de = false;
+
+    if (config->de_mode == NMBS_Z_SERIAL_DE_NONE) {
+        return 0;
+    }
+
+    if (config->de_mode == NMBS_Z_SERIAL_DE_AUTO || config->de_mode == NMBS_Z_SERIAL_DE_HARDWARE) {
+        if (config->uart_dev != NULL) {
+            struct uart_config uart_cfg;
+            int ret = uart_config_get(config->uart_dev, &uart_cfg);
+
+            if (ret == 0) {
+                hw_de = (uart_cfg.flow_ctrl == UART_CFG_FLOW_CTRL_RS485);
+            } else if (config->de_mode == NMBS_Z_SERIAL_DE_HARDWARE) {
+                /* Runtime configuration queries are optional. When the
+                 * driver cannot report its configuration, trust that the
+                 * devicetree enabled hardware DE.
+                 */
+                hw_de = true;
+            }
+        }
+
+        if (config->de_mode == NMBS_Z_SERIAL_DE_HARDWARE && !hw_de) {
+            LOG_ERR("Hardware RS-485 DE requested but UART is not configured for it");
+            return -ENOTSUP;
+        }
+    }
+
+    if (config->de_mode == NMBS_Z_SERIAL_DE_GPIO) {
+        if (config->de_gpio.port == NULL) {
+            LOG_ERR("GPIO RS-485 DE requested without a DE GPIO");
+            return -EINVAL;
+        }
+        gpio_de = true;
+    } else if (config->de_mode == NMBS_Z_SERIAL_DE_AUTO && !hw_de && config->de_gpio.port != NULL) {
+        gpio_de = true;
+    }
+
+    if (gpio_de) {
+        if (!device_is_ready(config->de_gpio.port)) {
+            LOG_ERR("RS-485 DE GPIO port not ready");
+            return -ENODEV;
+        }
+
+        int ret = gpio_pin_configure_dt(&config->de_gpio, GPIO_OUTPUT_INACTIVE);
+        if (ret < 0) {
+            LOG_ERR("Failed to configure RS-485 DE pin (%d)", ret);
+            return ret;
+        }
+    }
+
+    transport->de_hw = hw_de;
+    transport->de_gpio = gpio_de;
+
+    if (hw_de) {
+        LOG_DBG("Using UART hardware RS-485 driver-enable");
+    } else if (gpio_de) {
+        LOG_DBG("Using GPIO RS-485 driver-enable");
+    }
+
+    return 0;
+}
+
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
+static void serial_irq_cb(const struct device *dev, void *user_data)
+{
+    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)user_data;
+    uint8_t chunk[32];
+
+    uart_irq_update(dev);
+
+    while (uart_irq_rx_ready(dev) > 0) {
+        int read = uart_fifo_read(dev, chunk, sizeof(chunk));
+
+        if (read <= 0) {
+            break;
+        }
+
+        (void)nmbs_z_serial_transport_rx_put(transport, chunk, (uint32_t)read);
+    }
+}
+#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
+
+static void serial_async_rearm(nmbs_z_serial_transport_t *transport)
+{
+    if (!atomic_get(&transport->rx_active)) {
+        return;
+    }
+
+    transport->async_next_buf = 1;
+
+    int ret = uart_rx_enable(transport->cfg.uart_dev, transport->async_rx_buffer[0],
+                             sizeof(transport->async_rx_buffer[0]), (int32_t)transport->t1_5_us);
+    if (ret != 0) {
+        LOG_ERR("Failed to enable asynchronous UART RX (%d)", ret);
+        atomic_set(&transport->rx_active, 0);
+    }
+}
+
+static void serial_async_cb(const struct device *dev, struct uart_event *evt, void *user_data)
+{
+    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)user_data;
+
+    switch (evt->type) {
+    case UART_RX_RDY:
+        if (atomic_get(&transport->rx_active)) {
+            (void)nmbs_z_serial_transport_rx_put(transport, evt->data.rx.buf + evt->data.rx.offset,
+                                                 evt->data.rx.len);
+        }
+        break;
+
+    case UART_RX_BUF_REQUEST: {
+        uint8_t idx = transport->async_next_buf;
+        int ret = uart_rx_buf_rsp(dev, transport->async_rx_buffer[idx],
+                                  sizeof(transport->async_rx_buffer[idx]));
+
+        if (ret == 0) {
+            transport->async_next_buf = idx ? 0 : 1;
+        } else {
+            LOG_WRN("Failed to provide UART RX buffer (%d)", ret);
+        }
+        break;
+    }
+
+    case UART_RX_BUF_RELEASED:
+        break;
+
+    case UART_RX_DISABLED:
+        if (atomic_get(&transport->rx_active)) {
+            serial_async_rearm(transport);
+        }
+        break;
+
+    case UART_RX_STOPPED:
+        LOG_WRN("UART RX stopped (reason 0x%x)", evt->data.rx_stop.reason);
+        break;
+
+    default:
+        break;
+    }
+}
+
+int nmbs_z_serial_transport_start_rx(nmbs_z_serial_transport_t *transport)
+{
+    if (!transport || transport->cfg.uart_dev == NULL) {
+        return -EINVAL;
+    }
+
+    if (atomic_get(&transport->rx_active)) {
+        return 0;
+    }
+
+    if (transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_EXTERNAL) {
+        return 0;
+    }
+
+    atomic_set(&transport->rx_active, 1);
+
+    if (transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_IRQ) {
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
+        int ret = uart_irq_callback_user_data_set(transport->cfg.uart_dev, serial_irq_cb, transport);
+
+        if (ret != 0) {
+            atomic_set(&transport->rx_active, 0);
+            LOG_ERR("Failed to install UART IRQ callback (%d)", ret);
+            return ret;
+        }
+
+        uart_irq_rx_enable(transport->cfg.uart_dev);
+        return 0;
+#else
+        atomic_set(&transport->rx_active, 0);
+        LOG_ERR("IRQ receive mode requires CONFIG_UART_INTERRUPT_DRIVEN");
+        return -ENOTSUP;
+#endif
+    }
+
+    if (transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_ASYNC) {
+        int ret = uart_callback_set(transport->cfg.uart_dev, serial_async_cb, transport);
+
+        if (ret != 0) {
+            atomic_set(&transport->rx_active, 0);
+            LOG_ERR("Failed to install UART async callback (%d)", ret);
+            return ret;
+        }
+
+        serial_async_rearm(transport);
+        if (!atomic_get(&transport->rx_active)) {
+            return -EIO;
+        }
+        return 0;
+    }
+
+    atomic_set(&transport->rx_active, 0);
+    return -EINVAL;
+}
+
+int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t *transport)
+{
+    if (!transport) {
+        return -EINVAL;
+    }
+
+    if (!atomic_cas(&transport->rx_active, 1, 0)) {
+        return 0;
+    }
+
+    if (transport->cfg.uart_dev == NULL) {
+        return 0;
+    }
+
+    if (transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_IRQ) {
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
+        uart_irq_rx_disable(transport->cfg.uart_dev);
+#endif
+    } else if (transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_ASYNC) {
+        (void)uart_rx_disable(transport->cfg.uart_dev);
+    }
+
+    return 0;
+}
+
 int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
                                  const nmbs_z_serial_transport_config_t *config,
                                  nmbs_platform_conf *platform_conf)
@@ -47,27 +275,32 @@ int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
         return -ENODEV;
     }
 
-    if (config->de_gpio.port != NULL) {
-        if (!device_is_ready(config->de_gpio.port)) {
-            LOG_ERR("RS-485 DE GPIO port not ready");
-            return -ENODEV;
-        }
-
-        int ret = gpio_pin_configure_dt(&config->de_gpio, GPIO_OUTPUT_INACTIVE);
-        if (ret < 0) {
-            LOG_ERR("Failed to configure RS-485 DE pin (%d)", ret);
-            return ret;
+    if (config->rx_mode == NMBS_Z_SERIAL_RX_IRQ || config->rx_mode == NMBS_Z_SERIAL_RX_ASYNC) {
+        if (config->uart_dev == NULL) {
+            return -EINVAL;
         }
     }
 
+    memset(transport, 0, sizeof(*transport));
     transport->cfg = *config;
+    if (transport->cfg.stop_bits == 0) {
+        transport->cfg.stop_bits = UART_CFG_STOP_BITS_1;
+    }
+    if (transport->cfg.data_bits == 0) {
+        transport->cfg.data_bits = UART_CFG_DATA_BITS_8;
+    }
+
     nmbs_z_serial_calc_timings(config->baud_rate, &transport->t1_5_us, &transport->t3_5_us);
 
-    transport->rx_buf = transport->rx_buffer;
-    transport->rx_buf_size = sizeof(transport->rx_buffer);
-
-    ring_buf_init(&transport->rx_rb, transport->rx_buf_size, transport->rx_buf);
+    ring_buf_init(&transport->rx_rb, sizeof(transport->rx_buffer), transport->rx_buffer);
     k_sem_init(&transport->rx_sem, 0, K_SEM_MAX_LIMIT);
+    atomic_set(&transport->rx_active, 0);
+    atomic_set(&transport->rx_overflow, 0);
+
+    int ret = serial_resolve_de(transport);
+    if (ret != 0) {
+        return ret;
+    }
 
     nmbs_platform_conf_create(platform_conf);
     platform_conf->transport = NMBS_TRANSPORT_RTU;
@@ -76,7 +309,34 @@ int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
     platform_conf->flush = nmbs_z_transport_serial_flush;
     platform_conf->arg = transport;
 
+    if (transport->cfg.rx_mode != NMBS_Z_SERIAL_RX_EXTERNAL) {
+        ret = nmbs_z_serial_transport_start_rx(transport);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
     return 0;
+}
+
+void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t *transport)
+{
+    if (!transport) {
+        return;
+    }
+
+    (void)nmbs_z_serial_transport_stop_rx(transport);
+
+    k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
+
+    ring_buf_reset(&transport->rx_rb);
+    k_spin_unlock(&transport->rb_lock, key);
+    k_sem_reset(&transport->rx_sem);
+    atomic_set(&transport->rx_overflow, 0);
+
+    if (transport->de_gpio) {
+        (void)gpio_pin_set_dt(&transport->cfg.de_gpio, 0);
+    }
 }
 
 int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
@@ -92,10 +352,10 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
     }
 
     nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
-    bool has_de = (transport->cfg.de_gpio.port != NULL);
+    bool gpio_de = transport->de_gpio;
 
-    /* 1. Assert RS-485 DE pin */
-    if (has_de) {
+    /* 1. Assert RS-485 DE pin (hardware DE is driven by the UART itself). */
+    if (gpio_de) {
         gpio_pin_set_dt(&transport->cfg.de_gpio, 1);
         if (transport->cfg.de_pre_delay_us > 0) {
             k_busy_wait(transport->cfg.de_pre_delay_us);
@@ -108,7 +368,7 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
             uart_poll_out(transport->cfg.uart_dev, buf[i]);
         }
 
-#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
         uart_irq_update(transport->cfg.uart_dev);
         while (uart_irq_tx_complete(transport->cfg.uart_dev) == 0) {
             k_busy_wait(10);
@@ -116,14 +376,16 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
 #endif
     }
 
-    /* 3. Review Focus 2: Wait for shift register drain and post delay before deasserting DE */
-    if (has_de) {
-        if (transport->cfg.uart_dev != NULL && transport->cfg.baud_rate > 0) {
-            uint32_t char_time_us = 11000000UL / transport->cfg.baud_rate;
-            if (char_time_us > 0) {
-                k_busy_wait(char_time_us);
-            }
+    /* 3. Wait for the shift register to drain before releasing DE. */
+    if (transport->cfg.uart_dev != NULL && transport->cfg.baud_rate > 0) {
+        uint32_t char_time_us = (uint32_t)((NMBS_SERIAL_CHAR_BITS * 1000000UL) / transport->cfg.baud_rate);
+
+        if (char_time_us > 0) {
+            k_busy_wait(char_time_us);
         }
+    }
+
+    if (gpio_de) {
         if (transport->cfg.de_post_delay_us > 0) {
             k_busy_wait(transport->cfg.de_post_delay_us);
         }
@@ -147,7 +409,20 @@ int32_t nmbs_z_transport_serial_read(uint8_t *buf, uint16_t count, int32_t byte_
     uint16_t bytes_read = 0;
 
     while (bytes_read < count) {
+        if (atomic_cas(&transport->rx_overflow, 1, 0)) {
+            k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
+
+            ring_buf_reset(&transport->rx_rb);
+            k_spin_unlock(&transport->rb_lock, key);
+            k_sem_reset(&transport->rx_sem);
+            return -EOVERFLOW;
+        }
+
+        k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
         uint32_t got = ring_buf_get(&transport->rx_rb, &buf[bytes_read], count - bytes_read);
+
+        k_spin_unlock(&transport->rb_lock, key);
+
         if (got > 0) {
             bytes_read += (uint16_t)got;
             continue;
@@ -176,11 +451,17 @@ void nmbs_z_transport_serial_flush(nmbs_t *nmbs, void *arg)
     }
 
     nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
+    k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
 
     ring_buf_reset(&transport->rx_rb);
+    k_spin_unlock(&transport->rb_lock, key);
     k_sem_reset(&transport->rx_sem);
+    atomic_set(&transport->rx_overflow, 0);
 
-    if (transport->cfg.uart_dev != NULL) {
+    /* Only the external/polling path can safely drain the hardware FIFO.
+     * IRQ and ASYNC modes own the RX FIFO through their callbacks.
+     */
+    if (transport->cfg.uart_dev != NULL && transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_EXTERNAL) {
         unsigned char dummy;
         while (uart_poll_in(transport->cfg.uart_dev, &dummy) == 0) {
             /* Drain hardware RX FIFO */
@@ -194,11 +475,21 @@ int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const u
         return 0;
     }
 
+    k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
     uint32_t put = ring_buf_put(&transport->rx_rb, data, length);
+
+    k_spin_unlock(&transport->rb_lock, key);
+
+    if (put < length) {
+        atomic_set(&transport->rx_overflow, 1);
+    }
+
     if (put > 0) {
-        for (uint32_t i = 0; i < put; i++) {
-            k_sem_give(&transport->rx_sem);
-        }
+        k_sem_give(&transport->rx_sem);
+    }
+
+    if (transport->cfg.rx_cb != NULL && put > 0) {
+        transport->cfg.rx_cb(transport, data, put, transport->cfg.rx_cb_user_data);
     }
 
     return (int)put;
