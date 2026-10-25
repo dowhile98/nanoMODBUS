@@ -41,7 +41,14 @@ extern "C" {
  *   callback and drains the hardware FIFO in interrupt context.
  * - @ref NMBS_Z_SERIAL_RX_ASYNC: the transport uses the Zephyr asynchronous
  *   UART API (DMA or interrupt backed, depending on the driver) with two
- *   alternating receive buffers.
+ *   alternating receive buffers. The UART receive timeout (RTO) is programmed
+ *   to t1.5, so the driver delivers a chunk as soon as the line goes idle
+ *   instead of waiting for the buffer to fill. Drivers that DMA into RAM
+ *   require those buffers to be in non-cacheable memory: on a cache-enabled
+ *   MCU (for example STM32H7 with CONFIG_DCACHE) either disable the data
+ *   cache for this application or use a board whose RAM is not cached, as the
+ *   buffers live inside the transport structure. A failure to start RX is
+ *   reported instead of leaving the transport silently deaf.
  *
  * IRQ and ASYNC modes require exclusive ownership of the UART instance.
  */
@@ -119,6 +126,7 @@ typedef struct nmbs_z_serial_transport {
     uint32_t last_rx_cycles;             /**< Cycle counter of the last queued byte */
     uint8_t async_rx_buffer[2][CONFIG_NANOMODBUS_SERIAL_ASYNC_RX_BUF_SIZE];
     uint8_t async_next_buf;              /**< Buffer index to hand to the driver next */
+    struct k_work rx_restart_work;       /**< Deferred recovery after a UART RX error */
     bool de_hw;                          /**< UART hardware driver-enable is active */
     bool de_gpio;                        /**< Software GPIO driver-enable is active */
 } nmbs_z_serial_transport_t;

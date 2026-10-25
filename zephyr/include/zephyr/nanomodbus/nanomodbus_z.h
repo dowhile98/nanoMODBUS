@@ -176,6 +176,7 @@ typedef struct nmbs_z_client {
     nmbs_platform_conf platform;     /**< Platform transport configuration */
     int32_t read_timeout_ms;         /**< First-byte/response timeout in milliseconds */
     int32_t byte_timeout_ms;         /**< Inter-byte timeout in milliseconds */
+    nmbs_error last_error;           /**< Raw result of the last request, including exception codes */
 } nmbs_z_client_t;
 
 /**
@@ -202,6 +203,28 @@ int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transp
  * @return 0 on success, negative errno on failure.
  */
 int nmbs_z_client_set_timeouts(nmbs_z_client_t *client, int32_t read_timeout_ms, int32_t byte_timeout_ms);
+
+/**
+ * @brief Return the raw nmbs_error produced by the most recent client call.
+ *
+ * The errno returned by the request helpers cannot carry a Modbus exception
+ * code: exceptions 1..4 are reported as ordinary negative errno values, so the
+ * caller cannot tell which exception the server raised. This getter exposes the
+ * unmodified nmbs_error, so callers can distinguish
+ * - a Modbus exception (value 1..4, see nmbs_error_is_exception()),
+ * - a transport problem (NMBS_ERROR_TRANSPORT, NMBS_ERROR_TIMEOUT, ...),
+ * - a malformed response (NMBS_ERROR_INVALID_RESPONSE, NMBS_ERROR_CRC, ...).
+ *
+ * The value is updated by every client helper, including failures to acquire
+ * the client lock (reported as NMBS_ERROR_TIMEOUT). It is a per-client, not
+ * per-call, value: with several threads sharing one client, read it under the
+ * same serialization the callers already use.
+ *
+ * @param client Pointer to client instance.
+ * @return Raw nmbs_error of the last operation, NMBS_ERROR_INVALID_ARGUMENT if
+ *         @p client is NULL.
+ */
+nmbs_error nmbs_z_client_get_last_error(const nmbs_z_client_t *client);
 
 /**
  * @brief Set the target server RTU address for subsequent client requests.
@@ -266,6 +289,151 @@ int nmbs_z_client_write_multiple_coils(nmbs_z_client_t *client, uint16_t address
 int nmbs_z_client_write_multiple_registers(nmbs_z_client_t *client, uint16_t address,
                                            uint16_t quantity, const uint16_t *registers,
                                            k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read File Record (FC 20).
+ *
+ * @param client Pointer to client instance.
+ * @param file_number File number (1-65535).
+ * @param record_number Record number inside the file (0-9999).
+ * @param registers_out Array receiving @p quantity registers.
+ * @param quantity Number of registers to read.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure. Use
+ *         nmbs_z_client_get_last_error() for the unmodified error code.
+ */
+int nmbs_z_client_read_file_record(nmbs_z_client_t *client, uint16_t file_number,
+                                   uint16_t record_number, uint16_t *registers_out,
+                                   uint16_t quantity, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Write File Record (FC 21).
+ *
+ * @param client Pointer to client instance.
+ * @param file_number File number (1-65535).
+ * @param record_number Record number inside the file (0-9999).
+ * @param registers Array of @p quantity registers to write.
+ * @param quantity Number of registers to write.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_write_file_record(nmbs_z_client_t *client, uint16_t file_number,
+                                    uint16_t record_number, const uint16_t *registers,
+                                    uint16_t quantity, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read/Write Multiple Registers (FC 23).
+ *
+ * Performs the write and the read in a single Modbus transaction, so no other
+ * thread can interleave a request between them.
+ *
+ * @param client Pointer to client instance.
+ * @param read_address Starting address of the registers to read.
+ * @param read_quantity Number of registers to read.
+ * @param registers_out Array receiving @p read_quantity registers.
+ * @param write_address Starting address of the registers to write.
+ * @param write_quantity Number of registers to write.
+ * @param registers Array of @p write_quantity registers to write.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_read_write_registers(nmbs_z_client_t *client, uint16_t read_address,
+                                       uint16_t read_quantity, uint16_t *registers_out,
+                                       uint16_t write_address, uint16_t write_quantity,
+                                       const uint16_t *registers, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Device Identification, basic objects (FC 43/14, code 1).
+ *
+ * @param client Pointer to client instance.
+ * @param vendor_name Buffer receiving the VendorName object.
+ * @param product_code Buffer receiving the ProductCode object.
+ * @param major_minor_revision Buffer receiving the MajorMinorRevision object.
+ * @param buffers_length Length of each of the three buffers.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_read_device_identification_basic(nmbs_z_client_t *client,
+                                                   char *vendor_name, char *product_code,
+                                                   char *major_minor_revision,
+                                                   uint8_t buffers_length,
+                                                   k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Device Identification, regular objects (FC 43/14, code 2).
+ *
+ * @param client Pointer to client instance.
+ * @param vendor_url Buffer receiving the VendorUrl object.
+ * @param product_name Buffer receiving the ProductName object.
+ * @param model_name Buffer receiving the ModelName object.
+ * @param user_application_name Buffer receiving the UserApplicationName object.
+ * @param buffers_length Length of each of the four buffers.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t *client,
+                                                     char *vendor_url, char *product_name,
+                                                     char *model_name,
+                                                     char *user_application_name,
+                                                     uint8_t buffers_length,
+                                                     k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Device Identification, extended objects (FC 43/14, code 3).
+ *
+ * @param client Pointer to client instance.
+ * @param object_id_start First object id to request (must be >= 0x80).
+ * @param ids Array receiving the object ids, @p ids_length entries.
+ * @param buffers Array of @p ids_length buffers receiving the object values.
+ * @param ids_length Number of entries in @p ids and @p buffers.
+ * @param buffer_length Length of every buffer in @p buffers.
+ * @param objects_count_out Number of objects actually returned.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t *client,
+                                                      uint8_t object_id_start, uint8_t *ids,
+                                                      char **buffers, uint8_t ids_length,
+                                                      uint8_t buffer_length,
+                                                      uint8_t *objects_count_out,
+                                                      k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Device Identification, single object (FC 43/14, code 4).
+ *
+ * @param client Pointer to client instance.
+ * @param object_id Object id to read (0x00-0x06 or >= 0x80).
+ * @param buffer Buffer receiving the object value.
+ * @param buffer_length Length of @p buffer.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_read_device_identification(nmbs_z_client_t *client, uint8_t object_id,
+                                             char *buffer, uint8_t buffer_length,
+                                             k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe raw Modbus PDU exchange.
+ *
+ * Sends an arbitrary function code and receives exactly @p response_length
+ * data bytes of the response. Both halves run under a single lock acquisition,
+ * so no other thread can inject a request between them (which would happen if
+ * nmbs_send_raw_pdu() and nmbs_receive_raw_pdu_response() were called
+ * separately through two client helpers).
+ *
+ * @param client Pointer to client instance.
+ * @param fc Function code to send.
+ * @param data Request payload (may be NULL when @p data_length is 0).
+ * @param data_length Request payload length.
+ * @param response Buffer receiving the response payload (may be NULL to
+ *                 discard it).
+ * @param response_length Number of response payload bytes to consume.
+ * @param lock_timeout Lock acquisition timeout.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_client_raw_pdu(nmbs_z_client_t *client, uint8_t fc, const uint8_t *data,
+                          uint16_t data_length, uint8_t *response,
+                          uint8_t response_length, k_timeout_t lock_timeout);
 
 #endif /* CONFIG_NANOMODBUS_CLIENT */
 

@@ -17,14 +17,14 @@ LOG_MODULE_REGISTER(nmbs_tcp, CONFIG_NANOMODBUS_LOG_LEVEL);
 static void tcp_apply_socket_options(int sock)
 {
     int opt = 1;
-    int ret = zsock_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    int ret = zsock_setsockopt(sock, NET_IPPROTO_TCP, ZSOCK_TCP_NODELAY, &opt, sizeof(opt));
 
     if (ret < 0) {
         LOG_WRN("TCP_NODELAY setsockopt failed: %d", errno);
     }
 
 #if defined(CONFIG_NANOMODBUS_TCP_KEEPALIVE)
-    ret = zsock_setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
+    ret = zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_KEEPALIVE, &opt, sizeof(opt));
     if (ret < 0) {
         LOG_WRN("SO_KEEPALIVE setsockopt failed: %d", errno);
         return;
@@ -34,9 +34,9 @@ static void tcp_apply_socket_options(int sock)
     int intvl = CONFIG_NANOMODBUS_TCP_KEEPINTVL_S;
     int cnt = CONFIG_NANOMODBUS_TCP_KEEPCNT;
 
-    if (zsock_setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle)) < 0 ||
-        zsock_setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl)) < 0 ||
-        zsock_setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt)) < 0) {
+    if (zsock_setsockopt(sock, NET_IPPROTO_TCP, ZSOCK_TCP_KEEPIDLE, &idle, sizeof(idle)) < 0 ||
+        zsock_setsockopt(sock, NET_IPPROTO_TCP, ZSOCK_TCP_KEEPINTVL, &intvl, sizeof(intvl)) < 0 ||
+        zsock_setsockopt(sock, NET_IPPROTO_TCP, ZSOCK_TCP_KEEPCNT, &cnt, sizeof(cnt)) < 0) {
         LOG_WRN("TCP keepalive tuning failed: %d", errno);
     }
 #endif /* CONFIG_NANOMODBUS_TCP_KEEPALIVE */
@@ -56,25 +56,25 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
     transport->sock = -1;
     transport->timeout_ms = timeout_ms;
 
-    struct sockaddr_in *addr4 = (struct sockaddr_in *)&transport->server_addr;
-    addr4->sin_family = AF_INET;
-    addr4->sin_port = htons(port);
-    int ret = zsock_inet_pton(AF_INET, server_ip, &addr4->sin_addr);
+    struct net_sockaddr_in *addr4 = (struct net_sockaddr_in *)&transport->server_addr;
+    addr4->sin_family = NET_AF_INET;
+    addr4->sin_port = net_htons(port);
+    int ret = zsock_inet_pton(NET_AF_INET, server_ip, &addr4->sin_addr);
     if (ret == 1) {
-        transport->addr_len = sizeof(struct sockaddr_in);
+        transport->addr_len = sizeof(struct net_sockaddr_in);
     } else {
-        struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&transport->server_addr;
-        addr6->sin6_family = AF_INET6;
-        addr6->sin6_port = htons(port);
-        ret = zsock_inet_pton(AF_INET6, server_ip, &addr6->sin6_addr);
+        struct net_sockaddr_in6 *addr6 = (struct net_sockaddr_in6 *)&transport->server_addr;
+        addr6->sin6_family = NET_AF_INET6;
+        addr6->sin6_port = net_htons(port);
+        ret = zsock_inet_pton(NET_AF_INET6, server_ip, &addr6->sin6_addr);
         if (ret != 1) {
             LOG_ERR("Invalid IP address: %s", server_ip);
             return -EINVAL;
         }
-        transport->addr_len = sizeof(struct sockaddr_in6);
+        transport->addr_len = sizeof(struct net_sockaddr_in6);
     }
 
-    int sock = zsock_socket(transport->server_addr.ss_family, SOCK_STREAM, IPPROTO_TCP);
+    int sock = zsock_socket(transport->server_addr.ss_family, NET_SOCK_STREAM, NET_IPPROTO_TCP);
     if (sock < 0) {
         LOG_ERR("Failed to create socket: %d", errno);
         return -errno;
@@ -86,13 +86,13 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
             .tv_sec = timeout_ms / 1000,
             .tv_usec = (timeout_ms % 1000) * 1000,
         };
-        zsock_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        zsock_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_RCVTIMEO, &tv, sizeof(tv));
+        zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_SNDTIMEO, &tv, sizeof(tv));
     }
 
     tcp_apply_socket_options(sock);
 
-    ret = zsock_connect(sock, (struct sockaddr *)&transport->server_addr, transport->addr_len);
+    ret = zsock_connect(sock, (struct net_sockaddr *)&transport->server_addr, transport->addr_len);
     if (ret < 0) {
         int err = -errno;
         LOG_ERR("Socket connect failed: %d", errno);
@@ -183,7 +183,7 @@ int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_tim
             }
         }
 
-        ssize_t ret = zsock_recv(transport->sock, buf + recvd, count - recvd, MSG_DONTWAIT);
+        ssize_t ret = zsock_recv(transport->sock, buf + recvd, count - recvd, ZSOCK_MSG_DONTWAIT);
 
         if (ret < 0) {
             if (errno == EINTR) {
@@ -246,7 +246,7 @@ int32_t nmbs_z_transport_tcp_write(const uint8_t *buf, uint16_t count, int32_t b
             }
         }
 
-        ssize_t ret = zsock_send(transport->sock, buf + sent, count - sent, MSG_DONTWAIT);
+        ssize_t ret = zsock_send(transport->sock, buf + sent, count - sent, ZSOCK_MSG_DONTWAIT);
 
         if (ret < 0) {
             if (errno == EINTR) {
@@ -286,7 +286,7 @@ void nmbs_z_transport_tcp_flush(nmbs_t *nmbs, void *arg)
 
     uint8_t dummy[128];
     while (1) {
-        ssize_t ret = zsock_recv(transport->sock, dummy, sizeof(dummy), MSG_DONTWAIT);
+        ssize_t ret = zsock_recv(transport->sock, dummy, sizeof(dummy), ZSOCK_MSG_DONTWAIT);
         if (ret <= 0) {
             break;
         }

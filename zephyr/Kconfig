@@ -101,6 +101,13 @@ config NANOMODBUS_SERIAL_ASYNC_RX_BUF_SIZE
 	  Size of each of the two buffers handed to the asynchronous UART API
 	  (DMA or interrupt backed) when NMBS_Z_SERIAL_RX_ASYNC is selected.
 
+	  The buffers are embedded in nmbs_z_serial_transport_t and therefore
+	  live in cacheable .bss. DMA-capable UART drivers that refuse cacheable
+	  buffers (for example STM32 with CONFIG_DCACHE) need either
+	  CONFIG_DCACHE=n or a non-cacheable RAM region. Otherwise
+	  uart_rx_enable() fails and the transport reports the error instead of
+	  starting.
+
 if NANOMODBUS_TRANSPORT_TCP
 
 config NANOMODBUS_TCP_KEEPALIVE
@@ -177,8 +184,11 @@ config NANOMODBUS_SERVER_TCP
 	depends on NANOMODBUS_SERVER && NANOMODBUS_TRANSPORT_TCP
 	default n
 	help
-	  Enables the Modbus TCP server engine. The server accepts one client
-	  at a time; additional connections wait in the listen backlog.
+	  Enables the Modbus TCP server engine. One instance serves one client
+	  connection at a time; additional connections wait in the listen
+	  backlog until the current one closes. This bounds the RAM cost to one
+	  core, one transport and one thread per instance. Start one instance
+	  per port when concurrent clients are needed.
 
 if NANOMODBUS_SERVER_TCP
 
@@ -224,6 +234,9 @@ config NANOMODBUS_BITFIELD_MAX
 	  bitfield operation. Must be a multiple of 8.
 
 menu "Function Code Memory Pruning"
+
+comment "These options prune server-side handlers only."
+comment "The client API keeps every function code: upstream ignores NMBS_CLIENT_*_DISABLED."
 
 config NANOMODBUS_FC_READ_COILS_DISABLED
 	bool "Disable FC 01 (Read Coils)"

@@ -179,9 +179,48 @@ static void serial_async_rearm(nmbs_z_serial_transport_t *transport)
 
     int ret = uart_rx_enable(transport->cfg.uart_dev, transport->async_rx_buffer[0],
                              sizeof(transport->async_rx_buffer[0]), (int32_t)transport->t1_5_us);
-    if (ret != 0) {
+    if (ret == 0) {
+        return;
+    }
+
+    if (ret == -EFAULT) {
+        /* STM32 DMA rejects cacheable buffers; the message must name the fix
+         * because the error alone is indistinguishable from a bad pointer.
+         */
+        LOG_ERR("Async RX buffer is not in non-cacheable memory; place the UART "
+                "buffers in a nocache region / disable CONFIG_DCACHE");
+    } else {
         LOG_ERR("Failed to enable asynchronous UART RX (%d)", ret);
-        atomic_set(&transport->rx_active, 0);
+    }
+
+    atomic_set(&transport->rx_active, 0);
+}
+
+/*
+ * A UART RX error stops the receiver, and the driver must release the DMA
+ * channel (uart_rx_disable()) before reception can be enabled again. That
+ * cannot be done from the event callback, which runs in ISR context, so the
+ * recovery is deferred to the system workqueue. The resulting UART_RX_DISABLED
+ * event re-arms reception.
+ */
+static void serial_async_restart_work_handler(struct k_work *work)
+{
+    nmbs_z_serial_transport_t *transport =
+        CONTAINER_OF(work, nmbs_z_serial_transport_t, rx_restart_work);
+
+    if (!atomic_get(&transport->rx_active)) {
+        return;
+    }
+
+    int ret = uart_rx_disable(transport->cfg.uart_dev);
+
+    /* -EFAULT means the driver already considers RX disabled but still emits
+     * UART_RX_DISABLED, which performs the re-arm. Any other failure has no
+     * guaranteed event, so re-arm explicitly.
+     */
+    if (ret != 0 && ret != -EFAULT) {
+        LOG_WRN("UART RX disable before restart failed (%d), re-enabling directly", ret);
+        serial_async_rearm(transport);
     }
 }
 
@@ -191,7 +230,7 @@ static void serial_async_cb(const struct device *dev, struct uart_event *evt, vo
 
     switch (evt->type) {
     case UART_RX_RDY:
-        if (atomic_get(&transport->rx_active)) {
+        if (atomic_get(&transport->rx_active) && evt->data.rx.len > 0) {
             (void)nmbs_z_serial_transport_rx_put(transport, evt->data.rx.buf + evt->data.rx.offset,
                                                  evt->data.rx.len);
         }
@@ -220,7 +259,10 @@ static void serial_async_cb(const struct device *dev, struct uart_event *evt, vo
         break;
 
     case UART_RX_STOPPED:
-        LOG_WRN("UART RX stopped (reason 0x%x)", evt->data.rx_stop.reason);
+        LOG_WRN("UART RX stopped (reason 0x%x), scheduling restart", evt->data.rx_stop.reason);
+        if (atomic_get(&transport->rx_active)) {
+            (void)k_work_submit(&transport->rx_restart_work);
+        }
         break;
 
     default:
@@ -293,6 +335,17 @@ int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t *transport)
         return 0;
     }
 
+    /* Drop a pending error-recovery restart so it cannot disable a receiver
+     * that is about to be started again.
+     */
+    if (k_is_in_isr()) {
+        (void)k_work_cancel(&transport->rx_restart_work);
+    } else {
+        struct k_work_sync sync;
+
+        (void)k_work_cancel_sync(&transport->rx_restart_work, &sync);
+    }
+
     if (transport->cfg.uart_dev == NULL) {
         return 0;
     }
@@ -344,6 +397,7 @@ int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
 
     ring_buf_init(&transport->rx_rb, sizeof(transport->rx_buffer), transport->rx_buffer);
     k_sem_init(&transport->rx_sem, 0, K_SEM_MAX_LIMIT);
+    k_work_init(&transport->rx_restart_work, serial_async_restart_work_handler);
     atomic_set(&transport->rx_active, 0);
     atomic_set(&transport->rx_overflow, 0);
     atomic_set(&transport->rx_resync_count, 0);

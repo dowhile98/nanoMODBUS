@@ -133,13 +133,18 @@ static const char *rx_mode_name(nmbs_z_serial_rx_mode_t mode)
 }
 
 /*
- * Pick the best receive path the UART actually supports. Async RX needs both
- * the async API and DMA channels in devicetree; IRQ mode needs the
- * interrupt-driven API. Anything else falls back to application polling.
+ * Pick the best receive path the UART actually supports.
+ *
+ * Async RX needs the async API and DMA channels in devicetree. It also needs
+ * the DMA-visible buffers to be non-cacheable: the transport keeps them in
+ * .bss, so on a cache-enabled MCU (STM32H7 with CONFIG_DCACHE) the STM32 UART
+ * driver rejects them. Fall back to IRQ mode in that case instead of failing
+ * to initialize; the nucleo_h743zi board config disables the data cache so
+ * this sample exercises the DMA path there.
  */
 static nmbs_z_serial_rx_mode_t select_rx_mode(void)
 {
-#if defined(CONFIG_UART_ASYNC_API) && DT_NODE_EXISTS(MODBUS_UART_NODE)
+#if defined(CONFIG_UART_ASYNC_API) && DT_NODE_EXISTS(MODBUS_UART_NODE) && !defined(CONFIG_DCACHE)
     if (DT_NODE_HAS_PROP(MODBUS_UART_NODE, dmas)) {
         return NMBS_Z_SERIAL_RX_ASYNC;
     }

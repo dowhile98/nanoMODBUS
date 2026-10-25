@@ -15,12 +15,6 @@
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/socket.h>
 
-#if !defined(CONFIG_NET_NAMESPACE_COMPAT_MODE)
-#define ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
-#include <zephyr/net/net_compat.h>
-#undef ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
-#endif
-
 #include <nanomodbus.h>
 #include "nanomodbus_z.h"
 
@@ -30,11 +24,15 @@ extern "C" {
 
 /**
  * @brief TCP Client Transport context.
+ *
+ * Address fields use the native Zephyr types (net_sockaddr_storage,
+ * net_socklen_t) so the header does not have to pull in the POSIX
+ * compatibility namespace.
  */
 typedef struct nmbs_z_tcp_transport {
     int sock;
-    struct sockaddr_storage server_addr;
-    socklen_t addr_len;
+    struct net_sockaddr_storage server_addr;
+    net_socklen_t addr_len;
     int32_t timeout_ms;
 } nmbs_z_tcp_transport_t;
 
@@ -111,12 +109,19 @@ typedef struct nmbs_z_server_tcp {
 /**
  * @brief Initialize Modbus TCP Server context.
  *
- * The server serves one client connection at a time. Additional clients are
- * accepted only after the current connection is closed.
+ * Concurrency contract: an instance serves exactly one client connection at a
+ * time. While a client is being served, further connection attempts stay in
+ * the listen backlog (CONFIG_NANOMODBUS_SERVER_TCP_BACKLOG) and are accepted
+ * only after the current client disconnects. This keeps the RAM cost at one
+ * core, one transport and one thread per server instance.
+ *
+ * To serve several clients concurrently, instantiate one
+ * nmbs_z_server_tcp_t per desired connection on different ports; each
+ * instance owns its own stack, core state and transport.
  *
  * @param server Pointer to uninitialized server context. It must remain valid
- *               and must not be placed on a stack that is destroyed while the
- *               server runs.
+ *               and be in static storage, because it embeds the listener
+ *               thread stack.
  * @param callbacks Modbus request handling callbacks.
  * @param port TCP port to listen on.
  * @return 0 on success, negative errno on failure.
@@ -128,10 +133,16 @@ int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
 /**
  * @brief Start the Modbus TCP Server thread.
  *
+ * Either pass @p callbacks and @p port to (re)initialize the instance, or pass
+ * NULL and 0 to start an instance already configured with
+ * nmbs_z_server_tcp_init().
+ *
  * @param server Pointer to server context.
- * @param callbacks Modbus request handling callbacks (if NULL, must have called nmbs_z_server_tcp_init).
- * @param port TCP port to bind (if 0, must have called nmbs_z_server_tcp_init).
- * @return 0 on success, negative errno on failure.
+ * @param callbacks Modbus request handling callbacks, or NULL to reuse the
+ *                  ones passed to nmbs_z_server_tcp_init().
+ * @param port TCP port to bind, or 0 to reuse the initialized port.
+ * @return 0 on success, -EALREADY if the server is already running, other
+ *         negative errno on failure.
  */
 int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
                             const nmbs_callbacks *callbacks,

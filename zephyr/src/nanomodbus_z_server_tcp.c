@@ -18,7 +18,7 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
 
     nmbs_z_server_tcp_t *server = (nmbs_z_server_tcp_t *)arg1;
 
-    server->listen_sock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    server->listen_sock = zsock_socket(NET_AF_INET, NET_SOCK_STREAM, NET_IPPROTO_TCP);
     if (server->listen_sock < 0) {
         LOG_ERR("Failed to create listen socket: %d", errno);
         atomic_set(&server->running, 0);
@@ -28,18 +28,18 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
     }
 
     int opt = 1;
-    int ret = zsock_setsockopt(server->listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    int ret = zsock_setsockopt(server->listen_sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_REUSEADDR, &opt, sizeof(opt));
     if (ret < 0) {
         LOG_WRN("SO_REUSEADDR setsockopt failed: %d", errno);
     }
 
-    struct sockaddr_in bind_addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(server->port),
-        .sin_addr.s_addr = INADDR_ANY,
+    struct net_sockaddr_in bind_addr = {
+        .sin_family = NET_AF_INET,
+        .sin_port = net_htons(server->port),
+        .sin_addr.s_addr = NET_INADDR_ANY,
     };
 
-    ret = zsock_bind(server->listen_sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr));
+    ret = zsock_bind(server->listen_sock, (struct net_sockaddr *)&bind_addr, sizeof(bind_addr));
     if (ret < 0) {
         LOG_ERR("Failed to bind socket on port %d: %d", server->port, errno);
         zsock_close(server->listen_sock);
@@ -86,10 +86,10 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
         }
 
         if (pfd.revents & ZSOCK_POLLIN) {
-            struct sockaddr_storage client_addr;
-            socklen_t client_addr_len = sizeof(client_addr);
+            struct net_sockaddr_storage client_addr;
+            net_socklen_t client_addr_len = sizeof(client_addr);
             int client_sock = zsock_accept(server->listen_sock,
-                                          (struct sockaddr *)&client_addr,
+                                          (struct net_sockaddr *)&client_addr,
                                           &client_addr_len);
             if (client_sock < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -254,11 +254,11 @@ int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server)
      * owner that closes the descriptors.
      */
     if (server->client_sock >= 0) {
-        (void)zsock_shutdown(server->client_sock, SHUT_RDWR);
+        (void)zsock_shutdown(server->client_sock, ZSOCK_SHUT_RDWR);
     }
 
     if (server->listen_sock >= 0) {
-        (void)zsock_shutdown(server->listen_sock, SHUT_RDWR);
+        (void)zsock_shutdown(server->listen_sock, ZSOCK_SHUT_RDWR);
     }
 
     int ret = k_sem_take(&server->stop_sem, K_MSEC(2000));
