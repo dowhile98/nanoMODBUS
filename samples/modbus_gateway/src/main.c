@@ -12,7 +12,7 @@
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
 #include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
 
-LOG_MODULE_REGISTER(modbus_gateway, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(modbus_gateway, CONFIG_NANOMODBUS_LOG_LEVEL);
 
 #define GATEWAY_TCP_PORT 502
 

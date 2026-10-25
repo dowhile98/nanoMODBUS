@@ -6,11 +6,12 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
 
-LOG_MODULE_REGISTER(server_rtu_app, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(server_rtu_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 
 #define HOLDING_REG_COUNT 16
 #define COIL_COUNT 16
@@ -122,9 +123,7 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value,
 static void uart_irq_cb(const struct device *dev, void *user_data)
 {
     nmbs_z_server_rtu_t *server = (nmbs_z_server_rtu_t *)user_data;
-    if (!uart_irq_update(dev)) {
-        return;
-    }
+    uart_irq_update(dev);
     while (uart_irq_rx_ready(dev)) {
         uint8_t byte;
         if (uart_fifo_read(dev, &byte, 1) <= 0) {
@@ -158,6 +157,9 @@ int main(void)
         .de_pre_delay_us = 0,
         .de_post_delay_us = 0,
     };
+#if DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(modbus_de))
+    config.de_gpio = (struct gpio_dt_spec)GPIO_DT_SPEC_GET(DT_ALIAS(modbus_de), gpios);
+#endif
 
     nmbs_callbacks cbs = {
         .read_holding_registers = handle_read_holding_registers,

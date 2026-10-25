@@ -1,0 +1,23 @@
+/*
+ * Copyright (c) 2026 nanoMODBUS Contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+	aliases {
+		modbus-uart = &usart2;
+		modbus-de = &rs485_de;
+	};
+
+	rs485_de: rs485_de {
+		compatible = "vnd,phandle-holder", "vnd,gpio-device";
+		gpios = <&gpiod 4 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&usart2 {
+	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};

@@ -9,7 +9,7 @@
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
 
-LOG_MODULE_REGISTER(client_tcp_app, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(client_tcp_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 502
