@@ -256,6 +256,7 @@ typedef struct nmbs_z_server_rtu {
     atomic_t running;                    /**< Server engine accepts requests */
     atomic_t rx_pending;                 /**< Bytes arrived during the last poll */
     atomic_t init_magic;                 /**< Guards against double initialization */
+    struct nmbs_z_stats stats;           /**< Server diagnostic statistics */
 } nmbs_z_server_rtu_t;
 
 /**
@@ -323,6 +324,23 @@ void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t *server, uint8_t byte);
  * @param length Number of bytes.
  */
 void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t *server, const uint8_t *data, uint32_t length);
+
+/**
+ * @brief Retrieve runtime diagnostic statistics from an RTU Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @param stats Pointer to output statistics structure.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z_stats *stats);
+
+/**
+ * @brief Reset runtime diagnostic statistics on an RTU Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server);
 
 #endif /* CONFIG_NANOMODBUS_SERVER_RTU */
 

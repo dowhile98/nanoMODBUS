@@ -530,8 +530,8 @@ ZTEST(nanomodbus_client, test_client_lock_contention_timeout)
     ret = nmbs_z_client_read_holding_registers(&client, 0, 1, &reg_val, K_NO_WAIT);
     zassert_true(ret == -EBUSY || ret == -ETIMEDOUT,
                  "Expected -EBUSY or -ETIMEDOUT on K_NO_WAIT contention, got %d", ret);
-    zassert_equal(nmbs_z_client_get_last_error(&client), NMBS_ERROR_TIMEOUT,
-                  "Lock contention must be recorded as NMBS_ERROR_TIMEOUT, got %d",
+    zassert_equal(nmbs_z_client_get_last_error(&client), NMBS_ERROR_NONE,
+                  "Lock contention must not mutate last_error without holding lock, got %d",
                   nmbs_z_client_get_last_error(&client));
 
     /* Attempt operation with short timeout -> must fail with -ETIMEDOUT or -EBUSY */
@@ -760,6 +760,140 @@ ZTEST(nanomodbus_client, test_client_raw_pdu)
     /* A raw exchange reports the raw error too. */
     zassert_equal(nmbs_z_client_get_last_error(&client), NMBS_ERROR_NONE,
                   "Raw PDU must clear last_error on success");
+}
+
+/* ========================================================================= */
+/* Test 9: Thread-safe _addr client API variants                             */
+/* ========================================================================= */
+ZTEST(nanomodbus_client, test_client_addr_variants)
+{
+    nmbs_z_client_t client;
+    nmbs_platform_conf platform;
+    nmbs_platform_conf_create(&platform);
+    platform.transport = NMBS_TRANSPORT_RTU;
+    platform.read = mock_transport_read;
+    platform.write = mock_transport_write;
+
+    int ret = nmbs_z_client_init(&client, &platform);
+    zassert_equal(ret, 0, "Client init must succeed");
+
+    const uint8_t target_unit = 7;
+    uint16_t reg_val = 0;
+    nmbs_bitfield bitfield_val = {0};
+
+    /* 1. Read holding registers _addr */
+    ret = nmbs_z_client_read_holding_registers_addr(&client, target_unit, 0, 1, &reg_val, K_MSEC(100));
+    zassert_equal(ret, 0, "read_holding_registers_addr failed: %d", ret);
+
+    /* 2. Read input registers _addr */
+    ret = nmbs_z_client_read_input_registers_addr(&client, target_unit, 0, 1, &reg_val, K_MSEC(100));
+    zassert_equal(ret, 0, "read_input_registers_addr failed: %d", ret);
+
+    /* 3. Read coils _addr */
+    ret = nmbs_z_client_read_coils_addr(&client, target_unit, 0, 1, bitfield_val, K_MSEC(100));
+    zassert_equal(ret, 0, "read_coils_addr failed: %d", ret);
+
+    /* 4. Read discrete inputs _addr */
+    ret = nmbs_z_client_read_discrete_inputs_addr(&client, target_unit, 0, 1, bitfield_val, K_MSEC(100));
+    zassert_equal(ret, 0, "read_discrete_inputs_addr failed: %d", ret);
+
+    /* 5. Write single coil _addr */
+    ret = nmbs_z_client_write_single_coil_addr(&client, target_unit, 0, true, K_MSEC(100));
+    zassert_equal(ret, 0, "write_single_coil_addr failed: %d", ret);
+
+    /* 6. Write single register _addr */
+    ret = nmbs_z_client_write_single_register_addr(&client, target_unit, 0, 0x1234, K_MSEC(100));
+    zassert_equal(ret, 0, "write_single_register_addr failed: %d", ret);
+
+    /* 7. Write multiple coils _addr */
+    ret = nmbs_z_client_write_multiple_coils_addr(&client, target_unit, 0, 1, bitfield_val, K_MSEC(100));
+    zassert_equal(ret, 0, "write_multiple_coils_addr failed: %d", ret);
+
+    /* 8. Write multiple registers _addr */
+    uint16_t write_reg = 0x5678;
+    ret = nmbs_z_client_write_multiple_registers_addr(&client, target_unit, 0, 1, &write_reg, K_MSEC(100));
+    zassert_equal(ret, 0, "write_multiple_registers_addr failed: %d", ret);
+
+    /* 9. Read/write registers _addr */
+    ret = nmbs_z_client_read_write_registers_addr(&client, target_unit, 0, 1, &reg_val, 0, 1, &write_reg, K_MSEC(100));
+    zassert_equal(ret, 0, "read_write_registers_addr failed: %d", ret);
+
+    zassert_equal(nmbs_z_client_get_last_error(&client), NMBS_ERROR_NONE,
+                  "last_error must be NMBS_ERROR_NONE after successful _addr calls");
+}
+
+/* ========================================================================= */
+/* Test 10: Concurrent _addr calls with differing unit IDs                   */
+/* ========================================================================= */
+struct addr_worker_arg {
+    nmbs_z_client_t *client;
+    uint8_t unit_id;
+    uint16_t reg_address;
+    int iterations;
+};
+
+static K_THREAD_STACK_ARRAY_DEFINE(addr_worker_stacks, 2, 2048);
+static struct k_thread addr_worker_threads[2];
+static struct addr_worker_arg addr_args[2];
+static atomic_t addr_worker_errors = ATOMIC_INIT(0);
+
+static void addr_worker_thread_fn(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
+    struct addr_worker_arg *arg = (struct addr_worker_arg *)p1;
+
+    for (int i = 0; i < arg->iterations; i++) {
+        uint16_t val = 0;
+        int ret = nmbs_z_client_read_holding_registers_addr(arg->client, arg->unit_id,
+                                                            arg->reg_address, 1, &val,
+                                                            K_MSEC(500));
+        if (ret != 0) {
+            atomic_inc(&addr_worker_errors);
+        }
+        k_yield();
+    }
+}
+
+ZTEST(nanomodbus_client, test_client_addr_concurrency)
+{
+    nmbs_z_client_t client;
+    nmbs_platform_conf platform;
+    nmbs_platform_conf_create(&platform);
+    platform.transport = NMBS_TRANSPORT_RTU;
+    platform.read = mock_transport_read;
+    platform.write = mock_transport_write;
+
+    int ret = nmbs_z_client_init(&client, &platform);
+    zassert_equal(ret, 0, "Client init must succeed");
+
+    atomic_set(&addr_worker_errors, 0);
+
+    addr_args[0].client = &client;
+    addr_args[0].unit_id = 10;
+    addr_args[0].reg_address = 0;
+    addr_args[0].iterations = 30;
+
+    addr_args[1].client = &client;
+    addr_args[1].unit_id = 20;
+    addr_args[1].reg_address = 1;
+    addr_args[1].iterations = 30;
+
+    for (int t = 0; t < 2; t++) {
+        k_thread_create(&addr_worker_threads[t],
+                        addr_worker_stacks[t],
+                        2048,
+                        addr_worker_thread_fn,
+                        &addr_args[t], NULL, NULL,
+                        5 + t, 0, K_NO_WAIT);
+    }
+
+    for (int t = 0; t < 2; t++) {
+        k_thread_join(&addr_worker_threads[t], K_FOREVER);
+    }
+
+    zassert_equal(atomic_get(&addr_worker_errors), 0,
+                  "Concurrent _addr calls across different unit IDs must not error or clash");
 }
 
 ZTEST_SUITE(nanomodbus_client, NULL, NULL, test_client_setup, NULL, NULL);

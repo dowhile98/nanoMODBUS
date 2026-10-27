@@ -7,7 +7,7 @@
 #include "nanomodbus.h"
 
 #define WIRE_SIZE 1024
-#define UNUSED_PARAM(x) ((x) = (x))
+#define UNUSED_PARAM(x) ((void) (x))
 
 uint32_t run = 1;
 
@@ -163,7 +163,7 @@ int main(int argc, char* argv[]) {
 
     nmbs_bitfield coils;
     for (uint32_t c = 0; c < 10; c++) {
-        nmbs_bitfield_write(coils, c, rand() % 1);
+        nmbs_bitfield_write(coils, c, rand() % 2);
     }
 
     nmbs_set_destination_rtu_address(&client, 33);
@@ -179,12 +179,12 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Error reading coils from %d %s\n", 33, nmbs_strerror(err));
     }
 
-    if (memcmp(coils, coils, sizeof(nmbs_bitfield)) != 0) {
+    if (memcmp(coils, coils_read, sizeof(nmbs_bitfield)) != 0) {
         fprintf(stderr, "Coils mismatch from %d\n", 33);
     }
 
     for (uint32_t c = 0; c < 10; c++) {
-        nmbs_bitfield_write(coils, c, rand() % 1);
+        nmbs_bitfield_write(coils, c, rand() % 2);
     }
 
     nmbs_set_destination_rtu_address(&client, 99);
@@ -199,7 +199,7 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Error reading coils from %d %s\n", 99, nmbs_strerror(err));
     }
 
-    if (memcmp(coils, coils, sizeof(nmbs_bitfield)) != 0) {
+    if (memcmp(coils, coils_read, sizeof(nmbs_bitfield)) != 0) {
         fprintf(stderr, "Coils mismatch from %d\n", 99);
     }
 

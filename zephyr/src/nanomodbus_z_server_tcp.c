@@ -11,6 +11,22 @@
 
 LOG_MODULE_REGISTER(nmbs_server_tcp, CONFIG_NANOMODBUS_LOG_LEVEL);
 
+static int32_t server_tcp_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
+{
+    nmbs_z_tcp_transport_t *transport = (nmbs_z_tcp_transport_t *)arg;
+    int32_t ret = nmbs_z_transport_tcp_write(buf, count, byte_timeout_ms, transport);
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+    if (ret > 0) {
+        nmbs_z_server_tcp_t *server = CONTAINER_OF(transport, nmbs_z_server_tcp_t, client_transport);
+        server->stats.tx_frames++;
+        if (count >= 8 && (buf[7] & 0x80)) {
+            server->stats.exceptions++;
+        }
+    }
+#endif
+    return ret;
+}
+
 static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
 {
     ARG_UNUSED(arg2);
@@ -106,6 +122,17 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
             /* Request loop with client */
             while (atomic_get(&server->running)) {
                 nmbs_error err = nmbs_server_poll(&server->core);
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+                if (err == NMBS_ERROR_CRC) {
+                    server->stats.crc_errors++;
+                } else if (err == NMBS_ERROR_TIMEOUT) {
+                    server->stats.timeouts++;
+                } else if (err == NMBS_ERROR_NONE) {
+                    if (server->core.msg.buf_idx > 0) {
+                        server->stats.rx_frames++;
+                    }
+                }
+#endif
 
                 if (err == NMBS_ERROR_NONE || err == NMBS_ERROR_TIMEOUT) {
                     /* Idle connection, or an incomplete frame that the core
@@ -168,7 +195,7 @@ int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
     nmbs_platform_conf_create(&platform_conf);
     platform_conf.transport = NMBS_TRANSPORT_TCP;
     platform_conf.read = nmbs_z_transport_tcp_read;
-    platform_conf.write = nmbs_z_transport_tcp_write;
+    platform_conf.write = server_tcp_write;
     platform_conf.flush = nmbs_z_transport_tcp_flush;
     platform_conf.arg = &server->client_transport;
 
@@ -272,6 +299,32 @@ int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server)
     atomic_set(&server->thread_active, 0);
 
     return 0;
+}
+
+int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z_stats *stats)
+{
+    if (!server || !stats) {
+        return -EINVAL;
+    }
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+    *stats = server->stats;
+    return 0;
+#else
+    return -ENOTSUP;
+#endif
+}
+
+int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t *server)
+{
+    if (!server) {
+        return -EINVAL;
+    }
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+    memset(&server->stats, 0, sizeof(server->stats));
+    return 0;
+#else
+    return -ENOTSUP;
+#endif
 }
 
 #endif /* CONFIG_NANOMODBUS_SERVER_TCP */

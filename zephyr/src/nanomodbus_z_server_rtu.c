@@ -36,6 +36,22 @@ static void on_silence_timer_expired(struct k_timer *timer)
     }
 }
 
+static int32_t server_rtu_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
+{
+    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
+    int32_t ret = nmbs_z_transport_serial_write(buf, count, byte_timeout_ms, transport);
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+    if (ret > 0) {
+        nmbs_z_server_rtu_t *server = CONTAINER_OF(transport, nmbs_z_server_rtu_t, transport);
+        server->stats.tx_frames++;
+        if (count >= 2 && (buf[1] & 0x80)) {
+            server->stats.exceptions++;
+        }
+    }
+#endif
+    return ret;
+}
+
 static void on_server_work(struct k_work *work)
 {
     nmbs_z_server_rtu_t *server = CONTAINER_OF(work, nmbs_z_server_rtu_t, work);
@@ -45,7 +61,18 @@ static void on_server_work(struct k_work *work)
     }
 
     atomic_set(&server->rx_pending, 0);
-    (void)nmbs_server_poll(&server->core);
+    nmbs_error err = nmbs_server_poll(&server->core);
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+    if (err == NMBS_ERROR_CRC) {
+        server->stats.crc_errors++;
+    } else if (err == NMBS_ERROR_TIMEOUT) {
+        server->stats.timeouts++;
+    } else if (err == NMBS_ERROR_NONE) {
+        if (server->core.msg.buf_idx > 0) {
+            server->stats.rx_frames++;
+        }
+    }
+#endif
 
     /* If more bytes arrived while the request was being handled, run again
      * instead of waiting for the next t3.5 expiry.
@@ -112,6 +139,8 @@ int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
     if (ret != 0) {
         return ret;
     }
+
+    platform_conf.write = server_rtu_write;
 
     /* Store callbacks and guarantee initialization marker */
     server->callbacks = *callbacks;
@@ -199,6 +228,32 @@ void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t *server, const uint8_t *data,
 void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t *server, uint8_t byte)
 {
     nmbs_z_server_rtu_rx_data(server, &byte, 1);
+}
+
+int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z_stats *stats)
+{
+    if (!server || !stats) {
+        return -EINVAL;
+    }
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+    *stats = server->stats;
+    return 0;
+#else
+    return -ENOTSUP;
+#endif
+}
+
+int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server)
+{
+    if (!server) {
+        return -EINVAL;
+    }
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+    memset(&server->stats, 0, sizeof(server->stats));
+    return 0;
+#else
+    return -ENOTSUP;
+#endif
 }
 
 #endif /* CONFIG_NANOMODBUS_SERVER_RTU */

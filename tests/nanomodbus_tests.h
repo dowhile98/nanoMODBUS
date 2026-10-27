@@ -21,7 +21,7 @@ typedef suseconds_t __suseconds_t;
 
 #define test(f) (nesting++, (f), nesting--)
 
-#define UNUSED_PARAM(x) ((x) = (x))
+#define UNUSED_PARAM(x) ((void) (x))
 
 
 const uint8_t TEST_SERVER_ADDR = 1;

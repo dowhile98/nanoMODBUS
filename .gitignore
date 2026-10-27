@@ -12,7 +12,7 @@ doxygen
 .superpowers*
 #/docs/superpowers*
 /.serial_mcp
-
+TASK.md
 .superpowers/sdd/2026-10-24-zephyr-module-integration/progress.md
 samples/client_tcp/.vscode/settings.json
 samples/server_rtu/.vscode/c_cpp_properties.json

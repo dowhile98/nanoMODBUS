@@ -345,4 +345,93 @@ ZTEST(nanomodbus_server_rtu, test_server_init_parameter_validation)
     zassert_equal(nmbs_z_server_rtu_start(&server), -EINVAL, "start before init");
 }
 
+ZTEST(nanomodbus_server_rtu, test_server_rtu_diagnostics_stats)
+{
+    static nmbs_z_server_rtu_t stats_server;
+    const struct device *uart = DEVICE_GET(mock_server_uart_dev);
+
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = uart,
+        .baud_rate = 115200,
+        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+    };
+
+    nmbs_callbacks cbs = {0};
+    nmbs_callbacks_create(&cbs);
+    cbs.read_holding_registers = mock_read_holding_registers;
+
+    int ret = nmbs_z_server_rtu_init(&stats_server, &cfg, &cbs, 1);
+    zassert_equal(ret, 0, "Server init failed: %d", ret);
+
+    struct nmbs_z_stats stats;
+    ret = nmbs_z_server_rtu_get_stats(&stats_server, &stats);
+    zassert_equal(ret, 0, "get_stats must succeed");
+    zassert_equal(stats.rx_frames, 0, "rx_frames must be 0 initially");
+    zassert_equal(stats.tx_frames, 0, "tx_frames must be 0 initially");
+    zassert_equal(stats.crc_errors, 0, "crc_errors must be 0 initially");
+    zassert_equal(stats.exceptions, 0, "exceptions must be 0 initially");
+    zassert_equal(stats.timeouts, 0, "timeouts must be 0 initially");
+
+    /* Send 1 valid FC03 request */
+    reset_server_tracker();
+    uint8_t req_fc03[8] = {1, 3, 0x00, 0x0A, 0x00, 0x02, 0, 0};
+    helper_append_crc(req_fc03, 6);
+    for (size_t i = 0; i < sizeof(req_fc03); i++) {
+        nmbs_z_server_rtu_rx_byte(&stats_server, req_fc03[i]);
+    }
+    k_sleep(K_MSEC(10));
+
+    ret = nmbs_z_server_rtu_get_stats(&stats_server, &stats);
+    zassert_equal(ret, 0, "get_stats must succeed");
+    zassert_equal(stats.rx_frames, 1, "rx_frames must be 1 (got %u)", stats.rx_frames);
+    zassert_equal(stats.tx_frames, 1, "tx_frames must be 1 (got %u)", stats.tx_frames);
+    zassert_equal(stats.crc_errors, 0, "crc_errors must be 0");
+    zassert_equal(stats.exceptions, 0, "exceptions must be 0");
+
+    /* Send 1 request with invalid CRC */
+    reset_server_tracker();
+    uint8_t req_bad_crc[8] = {1, 3, 0x00, 0x0A, 0x00, 0x02, 0xDE, 0xAD};
+    for (size_t i = 0; i < sizeof(req_bad_crc); i++) {
+        nmbs_z_server_rtu_rx_byte(&stats_server, req_bad_crc[i]);
+    }
+    k_sleep(K_MSEC(10));
+
+    ret = nmbs_z_server_rtu_get_stats(&stats_server, &stats);
+    zassert_equal(ret, 0, "get_stats must succeed");
+    zassert_equal(stats.crc_errors, 1, "crc_errors must be 1 (got %u)", stats.crc_errors);
+
+    /* Send 1 request with unsupported function code (causes Modbus exception 1) */
+    reset_server_tracker();
+    uint8_t req_unsupported_fc[8] = {1, 0x18, 0x00, 0x00, 0x00, 0x00, 0, 0};
+    helper_append_crc(req_unsupported_fc, 6);
+    for (size_t i = 0; i < sizeof(req_unsupported_fc); i++) {
+        nmbs_z_server_rtu_rx_byte(&stats_server, req_unsupported_fc[i]);
+    }
+    k_sleep(K_MSEC(10));
+
+    ret = nmbs_z_server_rtu_get_stats(&stats_server, &stats);
+    zassert_equal(ret, 0, "get_stats must succeed");
+    zassert_equal(stats.exceptions, 1, "exceptions must be 1 (got %u)", stats.exceptions);
+    zassert_equal(stats.rx_frames, 2, "rx_frames must be 2 (got %u)", stats.rx_frames);
+    zassert_equal(stats.tx_frames, 2, "tx_frames must be 2 (got %u)", stats.tx_frames);
+
+    /* Test reset_stats */
+    ret = nmbs_z_server_rtu_reset_stats(&stats_server);
+    zassert_equal(ret, 0, "reset_stats must succeed");
+    ret = nmbs_z_server_rtu_get_stats(&stats_server, &stats);
+    zassert_equal(ret, 0, "get_stats must succeed");
+    zassert_equal(stats.rx_frames, 0, "rx_frames must be 0 after reset");
+    zassert_equal(stats.tx_frames, 0, "tx_frames must be 0 after reset");
+    zassert_equal(stats.crc_errors, 0, "crc_errors must be 0 after reset");
+    zassert_equal(stats.exceptions, 0, "exceptions must be 0 after reset");
+    zassert_equal(stats.timeouts, 0, "timeouts must be 0 after reset");
+
+    /* Parameter validation */
+    zassert_equal(nmbs_z_server_rtu_get_stats(NULL, &stats), -EINVAL, "NULL server get");
+    zassert_equal(nmbs_z_server_rtu_get_stats(&stats_server, NULL), -EINVAL, "NULL stats get");
+    zassert_equal(nmbs_z_server_rtu_reset_stats(NULL), -EINVAL, "NULL server reset");
+
+    nmbs_z_server_rtu_stop(&stats_server);
+}
+
 ZTEST_SUITE(nanomodbus_server_rtu, NULL, NULL, NULL, NULL, NULL);

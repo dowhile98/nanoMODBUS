@@ -225,6 +225,12 @@ endif # NANOMODBUS_SERVER_TCP
 
 comment "Buffer and Protocol Tuning"
 
+config NANOMODBUS_DIAGNOSTICS
+	bool "Enable Modbus statistics and diagnostic counters"
+	default y
+	help
+	  Enables frame, CRC, exception, and timeout counters for Modbus RTU and TCP servers.
+
 config NANOMODBUS_BITFIELD_MAX
 	int "Maximum bitfield size for coils and discrete inputs"
 	default 2000

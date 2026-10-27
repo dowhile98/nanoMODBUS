@@ -1457,6 +1457,143 @@ void test_fc43_14(nmbs_transport transport) {
     stop_client_and_server();
 }
 
+static uint8_t mock_core_buf[512];
+static uint16_t mock_core_len = 0;
+static uint16_t mock_core_pos = 0;
+
+static int32_t mock_core_read(uint8_t* buf, uint16_t count, int32_t timeout, void* arg) {
+    UNUSED_PARAM(timeout);
+    UNUSED_PARAM(arg);
+    if (mock_core_pos + count > mock_core_len) {
+        return 0;
+    }
+    memcpy(buf, mock_core_buf + mock_core_pos, count);
+    mock_core_pos += count;
+    return (int32_t) count;
+}
+
+static int32_t mock_core_write(const uint8_t* buf, uint16_t count, int32_t timeout, void* arg) {
+    UNUSED_PARAM(buf);
+    UNUSED_PARAM(timeout);
+    UNUSED_PARAM(arg);
+    return (int32_t) count;
+}
+
+void test_core_improvements(void) {
+    should("correctly handle non-boolean values in nmbs_bitfield_write");
+    nmbs_bitfield bf;
+    memset(bf, 0, sizeof(bf));
+
+    /* Write non-boolean values: 2, 0xFF */
+    nmbs_bitfield_write(bf, 0, 2);
+    expect(nmbs_bitfield_read(bf, 0) == 1);
+    expect(nmbs_bitfield_read(bf, 1) == 0);
+    expect(bf[0] == 0x01);
+
+    nmbs_bitfield_write(bf, 2, 0xFF);
+    expect(nmbs_bitfield_read(bf, 2) == 1);
+    expect(nmbs_bitfield_read(bf, 3) == 0);
+    expect(bf[0] == 0x05);
+
+    /* Write 0 to clear bit 0 */
+    nmbs_bitfield_write(bf, 0, 0);
+    expect(nmbs_bitfield_read(bf, 0) == 0);
+    expect(nmbs_bitfield_read(bf, 1) == 0);
+    expect(nmbs_bitfield_read(bf, 2) == 1);
+    expect(bf[0] == 0x04);
+
+    should("verify extended Modbus exceptions definition and strerror");
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_ILLEGAL_FUNCTION));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_ILLEGAL_DATA_VALUE));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_SERVER_DEVICE_FAILURE));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_ACKNOWLEDGE));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_SERVER_DEVICE_BUSY));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_MEMORY_PARITY_ERROR));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_GATEWAY_PATH_UNAVAILABLE));
+    expect(nmbs_error_is_exception(NMBS_EXCEPTION_GATEWAY_TARGET_DEVICE_FAILED_TO_RESPOND));
+
+    expect(!nmbs_error_is_exception(0));
+    expect(!nmbs_error_is_exception(7));
+    expect(!nmbs_error_is_exception(9));
+    expect(!nmbs_error_is_exception(12));
+    expect(!nmbs_error_is_exception(-1));
+
+    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_ACKNOWLEDGE), "modbus exception 5: acknowledge") == 0);
+    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_SERVER_DEVICE_BUSY), "modbus exception 6: server device busy") == 0);
+    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_MEMORY_PARITY_ERROR), "modbus exception 8: memory parity error") == 0);
+    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_GATEWAY_PATH_UNAVAILABLE), "modbus exception 10: gateway path unavailable") == 0);
+    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_GATEWAY_TARGET_DEVICE_FAILED_TO_RESPOND), "modbus exception 11: gateway target device failed to respond") == 0);
+
+    should("reject TCP MBAP length == 255 on server");
+    nmbs_t srv;
+    nmbs_platform_conf pconf;
+    nmbs_platform_conf_create(&pconf);
+    pconf.transport = NMBS_TRANSPORT_TCP;
+    pconf.read = mock_core_read;
+    pconf.write = mock_core_write;
+
+    nmbs_callbacks cbs;
+    nmbs_callbacks_create(&cbs);
+    nmbs_error err = nmbs_server_create(&srv, 1, &pconf, &cbs);
+    expect(err == NMBS_ERROR_NONE);
+    nmbs_set_read_timeout(&srv, 100);
+    nmbs_set_byte_timeout(&srv, 100);
+
+    /* MBAP with length = 255 (0x00FF), tid = 1, proto = 0, unit = 1, fc = 3 */
+    uint8_t mbap_len255[] = {0x00, 0x01, 0x00, 0x00, 0x00, 0xFF, 0x01, 0x03};
+    memcpy(mock_core_buf, mbap_len255, sizeof(mbap_len255));
+    mock_core_len = sizeof(mbap_len255);
+    mock_core_pos = 0;
+
+    err = nmbs_server_poll(&srv);
+    expect(err == NMBS_ERROR_INVALID_TCP_MBAP);
+
+    should("parse extended exception codes on client");
+    nmbs_t client;
+    pconf.transport = NMBS_TRANSPORT_RTU;
+    err = nmbs_client_create(&client, &pconf);
+    expect(err == NMBS_ERROR_NONE);
+    nmbs_set_destination_rtu_address(&client, 1);
+    nmbs_set_read_timeout(&client, 100);
+    nmbs_set_byte_timeout(&client, 100);
+
+    uint8_t exceptions_to_test[] = {5, 6, 8, 10, 11};
+    for (size_t i = 0; i < sizeof(exceptions_to_test); i++) {
+        uint8_t exc = exceptions_to_test[i];
+        mock_core_buf[0] = 1;    /* unit id */
+        mock_core_buf[1] = 0x83; /* FC 3 + 0x80 */
+        mock_core_buf[2] = exc;  /* exception code */
+        uint16_t crc = nmbs_crc_calc(mock_core_buf, 3, NULL);
+        mock_core_buf[3] = (uint8_t) (crc >> 8);
+        mock_core_buf[4] = (uint8_t) (crc & 0xFF);
+        mock_core_len = 5;
+        mock_core_pos = 0;
+
+        uint16_t reg = 0;
+        err = nmbs_read_holding_registers(&client, 0, 1, &reg);
+        expect(err == (nmbs_error) exc);
+    }
+
+    /* Verify exception 7 and 9 are rejected as NMBS_ERROR_INVALID_RESPONSE */
+    uint8_t invalid_exceptions[] = {7, 9};
+    for (size_t i = 0; i < sizeof(invalid_exceptions); i++) {
+        uint8_t exc = invalid_exceptions[i];
+        mock_core_buf[0] = 1;
+        mock_core_buf[1] = 0x83;
+        mock_core_buf[2] = exc;
+        uint16_t crc = nmbs_crc_calc(mock_core_buf, 3, NULL);
+        mock_core_buf[3] = (uint8_t) (crc >> 8);
+        mock_core_buf[4] = (uint8_t) (crc & 0xFF);
+        mock_core_len = 5;
+        mock_core_pos = 0;
+
+        uint16_t reg = 0;
+        err = nmbs_read_holding_registers(&client, 0, 1, &reg);
+        expect(err == NMBS_ERROR_INVALID_RESPONSE);
+    }
+}
+
 nmbs_transport transports[2] = {NMBS_TRANSPORT_RTU, NMBS_TRANSPORT_TCP};
 const char* transports_str[2] = {"RTU", "TCP"};
 
@@ -1470,6 +1607,9 @@ void for_transports(void (*test_fn)(nmbs_transport), const char* should_str) {
 int main(int argc, char* argv[]) {
     UNUSED_PARAM(argc);
     UNUSED_PARAM(argv);
+
+    printf("Should pass core compliance and safety tests:\n");
+    test(test_core_improvements());
 
     for_transports(test_server_create, "create a modbus server");
 
