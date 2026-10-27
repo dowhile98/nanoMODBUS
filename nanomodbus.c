@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define NMBS_UNUSED_PARAM(x) ((x) = (x))
+#define NMBS_UNUSED_PARAM(x) ((void) (x))
 
 #ifdef NMBS_DEBUG
 #include <stdio.h>
@@ -149,6 +149,10 @@ static nmbs_error recv(nmbs_t* nmbs, uint16_t count) {
         return NMBS_ERROR_NONE;
     }
 
+    if (nmbs->msg.buf_idx + count > sizeof(nmbs->msg.buf)) {
+        return NMBS_ERROR_INVALID_RESPONSE;
+    }
+
     const int32_t ret =
             nmbs->platform.read(nmbs->msg.buf + nmbs->msg.buf_idx, count, nmbs->byte_timeout_ms, nmbs->platform.arg);
 
@@ -225,7 +229,7 @@ static void msg_state_req(nmbs_t* nmbs, uint8_t fc) {
 #endif
 
 
-nmbs_error nmbs_create(nmbs_t* nmbs, const nmbs_platform_conf* platform_conf) {
+static nmbs_error nmbs_create(nmbs_t* nmbs, const nmbs_platform_conf* platform_conf) {
     if (!nmbs)
         return NMBS_ERROR_INVALID_ARGUMENT;
 
@@ -368,7 +372,7 @@ static nmbs_error recv_msg_header(nmbs_t* nmbs, bool* first_byte_received) {
         nmbs->msg.unit_id = get_1(nmbs);
         nmbs->msg.fc = get_1(nmbs);
 
-        if (length < 2 || length > 255)
+        if (length < 2 || length > 254)
             return NMBS_ERROR_INVALID_TCP_MBAP;
 
         // Receive the rest of the message
@@ -500,7 +504,7 @@ static nmbs_error recv_res_header(nmbs_t* nmbs) {
             if (err != NMBS_ERROR_NONE)
                 return err;
 
-            if (exception < 1 || exception > 4)
+            if (!nmbs_error_is_exception((nmbs_error) exception))
                 return NMBS_ERROR_INVALID_RESPONSE;
 
             NMBS_DEBUG_PRINT("%d NMBS res <- address_rtu %d\texception %d\n", nmbs->address_rtu, nmbs->msg.unit_id,
@@ -615,7 +619,7 @@ static nmbs_error recv_read_registers_res(nmbs_t* nmbs, uint16_t quantity, uint1
 #endif
 
 
-nmbs_error recv_write_single_coil_res(nmbs_t* nmbs, uint16_t address, uint16_t value_req) {
+static nmbs_error recv_write_single_coil_res(nmbs_t* nmbs, uint16_t address, uint16_t value_req) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
         return err;
@@ -643,7 +647,7 @@ nmbs_error recv_write_single_coil_res(nmbs_t* nmbs, uint16_t address, uint16_t v
 }
 
 
-nmbs_error recv_write_single_register_res(nmbs_t* nmbs, uint16_t address, uint16_t value_req) {
+static nmbs_error recv_write_single_register_res(nmbs_t* nmbs, uint16_t address, uint16_t value_req) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
         return err;
@@ -670,7 +674,7 @@ nmbs_error recv_write_single_register_res(nmbs_t* nmbs, uint16_t address, uint16
 }
 
 
-nmbs_error recv_write_multiple_coils_res(nmbs_t* nmbs, uint16_t address, uint16_t quantity) {
+static nmbs_error recv_write_multiple_coils_res(nmbs_t* nmbs, uint16_t address, uint16_t quantity) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
         return err;
@@ -697,7 +701,7 @@ nmbs_error recv_write_multiple_coils_res(nmbs_t* nmbs, uint16_t address, uint16_
 }
 
 
-nmbs_error recv_write_multiple_registers_res(nmbs_t* nmbs, uint16_t address, uint16_t quantity) {
+static nmbs_error recv_write_multiple_registers_res(nmbs_t* nmbs, uint16_t address, uint16_t quantity) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
         return err;
@@ -724,7 +728,7 @@ nmbs_error recv_write_multiple_registers_res(nmbs_t* nmbs, uint16_t address, uin
 }
 
 
-nmbs_error recv_read_file_record_res(nmbs_t* nmbs, uint16_t* registers, uint16_t count) {
+static nmbs_error recv_read_file_record_res(nmbs_t* nmbs, uint16_t* registers, uint16_t count) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
         return err;
@@ -765,7 +769,7 @@ nmbs_error recv_read_file_record_res(nmbs_t* nmbs, uint16_t* registers, uint16_t
 }
 
 
-nmbs_error recv_write_file_record_res(nmbs_t* nmbs, uint16_t file_number, uint16_t record_number,
+static nmbs_error recv_write_file_record_res(nmbs_t* nmbs, uint16_t file_number, uint16_t record_number,
                                       const uint16_t* registers, uint16_t count) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
@@ -817,7 +821,7 @@ nmbs_error recv_write_file_record_res(nmbs_t* nmbs, uint16_t file_number, uint16
     return NMBS_ERROR_NONE;
 }
 
-nmbs_error recv_read_device_identification_res(nmbs_t* nmbs, uint8_t buffers_count, char** buffers_out,
+static nmbs_error recv_read_device_identification_res(nmbs_t* nmbs, uint8_t buffers_count, char** buffers_out,
                                                uint8_t buffers_length, const uint8_t* order, uint8_t* ids_out,
                                                uint8_t* next_object_id_out, uint8_t* objects_count_out) {
     nmbs_error err = recv_res_header(nmbs);
@@ -1340,12 +1344,7 @@ static nmbs_error handle_read_file_record(nmbs_t* nmbs) {
         uint16_t file_number;
         uint16_t record_number;
         uint16_t record_length;
-    }
-#if defined(__STDC_NO_VLA__) || defined(_MSC_VER)
-    subreq[35];    // 245 / subreq_header_size
-#else
-    subreq[subreq_count];
-#endif
+    } subreq[35];    // 245 / subreq_header_size
 
     uint8_t response_data_size = 0;
 
@@ -1559,11 +1558,7 @@ static nmbs_error handle_read_write_registers(nmbs_t* nmbs) {
     if (err != NMBS_ERROR_NONE)
         return err;
 
-#if defined(__STDC_NO_VLA__) || defined(_MSC_VER)
-    uint16_t registers[0x007B];
-#else
-    uint16_t registers[byte_count_write / 2];
-#endif
+    uint16_t registers[121];
     for (uint_fast8_t i = 0; i < byte_count_write / 2; i++) {
         registers[i] = get_2(nmbs);
         NMBS_DEBUG_PRINT("%d ", registers[i]);
@@ -1602,11 +1597,7 @@ static nmbs_error handle_read_write_registers(nmbs_t* nmbs) {
         }
 
         if (!nmbs->msg.broadcast) {
-#if defined(__STDC_NO_VLA__) || defined(_MSC_VER)
             uint16_t regs[125];
-#else
-            uint16_t regs[read_quantity];
-#endif
             err = nmbs->callbacks.read_holding_registers(read_address, read_quantity, regs, nmbs->msg.unit_id,
                                                          nmbs->callbacks.arg);
             if (err != NMBS_ERROR_NONE) {
@@ -2455,6 +2446,21 @@ const char* nmbs_strerror(nmbs_error error) {
 
         case NMBS_EXCEPTION_SERVER_DEVICE_FAILURE:
             return "modbus exception 4: server device failure";
+
+        case NMBS_EXCEPTION_ACKNOWLEDGE:
+            return "modbus exception 5: acknowledge";
+
+        case NMBS_EXCEPTION_SERVER_DEVICE_BUSY:
+            return "modbus exception 6: server device busy";
+
+        case NMBS_EXCEPTION_MEMORY_PARITY_ERROR:
+            return "modbus exception 8: memory parity error";
+
+        case NMBS_EXCEPTION_GATEWAY_PATH_UNAVAILABLE:
+            return "modbus exception 10: gateway path unavailable";
+
+        case NMBS_EXCEPTION_GATEWAY_TARGET_DEVICE_FAILED_TO_RESPOND:
+            return "modbus exception 11: gateway target device failed to respond";
 
         default:
             return "unknown error";

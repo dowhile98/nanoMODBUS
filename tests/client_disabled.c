@@ -1,6 +1,6 @@
 #include "nanomodbus.h"
 
-#define UNUSED_PARAM(x) ((x) = (x))
+#define UNUSED_PARAM(x) ((void) (x))
 
 
 int32_t read_empty(uint8_t* data, uint16_t count, int32_t timeout, void* arg) {

@@ -104,6 +104,7 @@ typedef struct nmbs_z_server_tcp {
     struct k_sem stop_sem;
     struct k_sem ready_sem;
     nmbs_z_tcp_transport_t client_transport;
+    struct nmbs_z_stats stats;           /**< Server diagnostic statistics */
 } nmbs_z_server_tcp_t;
 
 /**
@@ -155,6 +156,23 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
  * @return 0 on success, negative errno on failure.
  */
 int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server);
+
+/**
+ * @brief Retrieve runtime diagnostic statistics from a TCP Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @param stats Pointer to output statistics structure.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z_stats *stats);
+
+/**
+ * @brief Reset runtime diagnostic statistics on a TCP Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t *server);
 
 #endif /* CONFIG_NANOMODBUS_SERVER_TCP */
 

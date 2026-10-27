@@ -158,12 +158,76 @@ extern "C" {
 int nmbs_z_error_to_errno(nmbs_error err);
 
 /**
+ * @brief Converts a POSIX errno to a nanoMODBUS nmbs_error enum.
+ *
+ * @param err The POSIX errno (positive or negative).
+ * @return nmbs_error code.
+ */
+nmbs_error nmbs_z_errno_to_error(int err);
+
+/**
+ * @brief Converts a POSIX errno to a nanoMODBUS nmbs_error enum (alias).
+ *
+ * @param err The POSIX errno (positive or negative).
+ * @return nmbs_error code.
+ */
+nmbs_error errno_to_nmbs_error(int err);
+
+/**
  * @brief Returns a human-readable string representation of an nmbs_error.
  *
  * @param err The nmbs_error code.
  * @return Constant string description.
  */
 const char *nmbs_z_strerror(nmbs_error err);
+
+/**
+ * @brief Modbus server runtime diagnostics counters.
+ */
+struct nmbs_z_stats {
+    uint32_t rx_frames;  /**< Total frames received */
+    uint32_t tx_frames;  /**< Total frames transmitted */
+    uint32_t crc_errors; /**< Total CRC errors detected */
+    uint32_t exceptions; /**< Total Modbus exceptions generated/sent */
+    uint32_t timeouts;   /**< Total frame receive timeouts */
+};
+
+typedef struct nmbs_z_server_rtu nmbs_z_server_rtu_t;
+typedef struct nmbs_z_server_tcp nmbs_z_server_tcp_t;
+
+/**
+ * @brief Retrieve runtime diagnostic statistics from an RTU Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @param stats Pointer to output statistics structure.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z_stats *stats);
+
+/**
+ * @brief Reset runtime diagnostic statistics on an RTU Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server);
+
+/**
+ * @brief Retrieve runtime diagnostic statistics from a TCP Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @param stats Pointer to output statistics structure.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z_stats *stats);
+
+/**
+ * @brief Reset runtime diagnostic statistics on a TCP Server instance.
+ *
+ * @param server Pointer to server instance.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t *server);
 
 #ifdef CONFIG_NANOMODBUS_CLIENT
 
@@ -341,6 +405,69 @@ int nmbs_z_client_read_write_registers(nmbs_z_client_t *client, uint16_t read_ad
                                        uint16_t read_quantity, uint16_t *registers_out,
                                        uint16_t write_address, uint16_t write_quantity,
                                        const uint16_t *registers, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Holding Registers with explicit unit ID (FC 03).
+ */
+int nmbs_z_client_read_holding_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                              uint16_t address, uint16_t quantity,
+                                              uint16_t *registers_out, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Input Registers with explicit unit ID (FC 04).
+ */
+int nmbs_z_client_read_input_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                            uint16_t address, uint16_t quantity,
+                                            uint16_t *registers_out, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Coils with explicit unit ID (FC 01).
+ */
+int nmbs_z_client_read_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                  uint16_t address, uint16_t quantity,
+                                  nmbs_bitfield coils_out, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read Discrete Inputs with explicit unit ID (FC 02).
+ */
+int nmbs_z_client_read_discrete_inputs_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                            uint16_t address, uint16_t quantity,
+                                            nmbs_bitfield inputs_out, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Write Single Coil with explicit unit ID (FC 05).
+ */
+int nmbs_z_client_write_single_coil_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                        uint16_t address, bool value, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Write Single Register with explicit unit ID (FC 06).
+ */
+int nmbs_z_client_write_single_register_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                            uint16_t address, uint16_t value, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Write Multiple Coils with explicit unit ID (FC 15).
+ */
+int nmbs_z_client_write_multiple_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                           uint16_t address, uint16_t quantity,
+                                           const nmbs_bitfield coils, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Write Multiple Registers with explicit unit ID (FC 16).
+ */
+int nmbs_z_client_write_multiple_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                               uint16_t address, uint16_t quantity,
+                                               const uint16_t *registers, k_timeout_t lock_timeout);
+
+/**
+ * @brief Thread-safe Read/Write Multiple Registers with explicit unit ID (FC 23).
+ */
+int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                           uint16_t read_address, uint16_t read_quantity,
+                                           uint16_t *registers_out, uint16_t write_address,
+                                           uint16_t write_quantity, const uint16_t *registers,
+                                           k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Device Identification, basic objects (FC 43/14, code 1).

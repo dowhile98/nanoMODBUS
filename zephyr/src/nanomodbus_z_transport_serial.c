@@ -484,9 +484,12 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
         }
 
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN)
-        uart_irq_update(transport->cfg.uart_dev);
-        while (uart_irq_tx_complete(transport->cfg.uart_dev) == 0) {
+        uint32_t wait_us = 0;
+        const uint32_t max_wait_us = 50000; /* 50 ms timeout safeguard */
+        while (uart_irq_tx_complete(transport->cfg.uart_dev) == 0 && wait_us < max_wait_us) {
+            uart_irq_update(transport->cfg.uart_dev);
             k_busy_wait(10);
+            wait_us += 10;
         }
 #endif
     }

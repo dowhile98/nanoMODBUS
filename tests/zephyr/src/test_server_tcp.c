@@ -166,4 +166,78 @@ ZTEST(nanomodbus_server_tcp, test_tcp_server_graceful_shutdown)
     zassert_equal(ret, 0, "Second server stop should succeed idempotently");
 }
 
+/* Test 4: Modbus TCP Diagnostics Counters */
+ZTEST(nanomodbus_server_tcp, test_tcp_server_diagnostics_stats)
+{
+#if defined(CONFIG_NANOMODBUS_DIAGNOSTICS)
+    static nmbs_z_server_tcp_t server;
+    nmbs_callbacks cbs = {0};
+    cbs.read_holding_registers = mock_read_holding_registers;
+
+    int ret = nmbs_z_server_tcp_start(&server, &cbs, 5023);
+    zassert_equal(ret, 0, "Server start failed: %d", ret);
+
+    struct nmbs_z_stats stats;
+    ret = nmbs_z_server_tcp_get_stats(&server, &stats);
+    zassert_equal(ret, 0, "get_stats failed: %d", ret);
+    zassert_equal(stats.rx_frames, 0);
+    zassert_equal(stats.tx_frames, 0);
+    zassert_equal(stats.exceptions, 0);
+    zassert_equal(stats.crc_errors, 0);
+    zassert_equal(stats.timeouts, 0);
+
+    nmbs_z_tcp_transport_t transport;
+    nmbs_platform_conf platform;
+    ret = nmbs_z_tcp_transport_connect(&transport, "127.0.0.1", 5023, 1000, &platform);
+    zassert_equal(ret, 0, "Client connect failed");
+
+    nmbs_z_client_t client;
+    ret = nmbs_z_client_init(&client, &platform);
+    zassert_equal(ret, 0, "Client init failed");
+
+    uint16_t val = 0;
+    ret = nmbs_z_client_read_holding_registers(&client, 0, 1, &val, K_MSEC(1000));
+    zassert_equal(ret, 0);
+
+    ret = nmbs_z_server_tcp_get_stats(&server, &stats);
+    zassert_equal(ret, 0);
+    zassert_equal(stats.rx_frames, 1, "Expected 1 rx frame, got %u", stats.rx_frames);
+    zassert_equal(stats.tx_frames, 1, "Expected 1 tx frame, got %u", stats.tx_frames);
+    zassert_equal(stats.exceptions, 0);
+
+    /* Generate exception by reading out-of-bounds (mock returns NMBS_EXCEPTION_ILLEGAL_DATA_ADDRESS) */
+    ret = nmbs_z_client_read_holding_registers(&client, 100, 1, &val, K_MSEC(1000));
+    zassert_not_equal(ret, 0);
+
+    ret = nmbs_z_server_tcp_get_stats(&server, &stats);
+    zassert_equal(ret, 0);
+    zassert_equal(stats.rx_frames, 2, "Expected 2 rx frames, got %u", stats.rx_frames);
+    zassert_equal(stats.tx_frames, 2, "Expected 2 tx frames, got %u", stats.tx_frames);
+    zassert_equal(stats.exceptions, 1, "Expected 1 exception, got %u", stats.exceptions);
+
+    /* Parameter validation */
+    zassert_equal(nmbs_z_server_tcp_get_stats(NULL, &stats), -EINVAL, "NULL server get");
+    zassert_equal(nmbs_z_server_tcp_get_stats(&server, NULL), -EINVAL, "NULL stats get");
+    zassert_equal(nmbs_z_server_tcp_reset_stats(NULL), -EINVAL, "NULL server reset");
+
+    /* Reset stats */
+    ret = nmbs_z_server_tcp_reset_stats(&server);
+    zassert_equal(ret, 0);
+
+    ret = nmbs_z_server_tcp_get_stats(&server, &stats);
+    zassert_equal(ret, 0);
+    zassert_equal(stats.rx_frames, 0);
+    zassert_equal(stats.tx_frames, 0);
+    zassert_equal(stats.crc_errors, 0);
+    zassert_equal(stats.exceptions, 0);
+    zassert_equal(stats.timeouts, 0);
+
+    nmbs_z_tcp_transport_close(&transport);
+    ret = nmbs_z_server_tcp_stop(&server);
+    zassert_equal(ret, 0);
+#else
+    ztest_test_skip();
+#endif
+}
+
 ZTEST_SUITE(nanomodbus_server_tcp, NULL, NULL, server_tcp_before, NULL, NULL);

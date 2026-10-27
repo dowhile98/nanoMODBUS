@@ -20,11 +20,9 @@ static inline int client_lock(nmbs_z_client_t *client, k_timeout_t lock_timeout)
          */
         if (ret == -EAGAIN || ret == -EBUSY) {
             LOG_DBG("Client lock contention: timeout waiting for mutex");
-            client->last_error = NMBS_ERROR_TIMEOUT;
             return -ETIMEDOUT;
         }
         LOG_DBG("Client lock contention: %d", ret);
-        client->last_error = NMBS_ERROR_INVALID_ARGUMENT;
         return ret;
     }
     LOG_DBG("Client lock acquired");
@@ -403,6 +401,260 @@ int nmbs_z_client_read_write_registers(nmbs_z_client_t *client, uint16_t read_ad
 
     LOG_DBG("Read/write registers: rd=%u/%u, wr=%u/%u", read_address, read_quantity, write_address,
             write_quantity);
+    nmbs_error err = nmbs_read_write_registers(&client->core, read_address, read_quantity, registers_out,
+                                               write_address, write_quantity, registers);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Read/write registers error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_read_holding_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                              uint16_t address, uint16_t quantity,
+                                              uint16_t *registers_out, k_timeout_t lock_timeout)
+{
+    if (client == NULL || registers_out == NULL) {
+        LOG_ERR("Read holding registers failed: NULL parameter");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Read holding registers lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Reading holding registers: unit=%u, addr=%u, qty=%u", unit_id, address, quantity);
+    nmbs_error err = nmbs_read_holding_registers(&client->core, address, quantity, registers_out);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Read holding registers error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_read_input_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                            uint16_t address, uint16_t quantity,
+                                            uint16_t *registers_out, k_timeout_t lock_timeout)
+{
+    if (client == NULL || registers_out == NULL) {
+        LOG_ERR("Read input registers failed: NULL parameter");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Read input registers lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Reading input registers: unit=%u, addr=%u, qty=%u", unit_id, address, quantity);
+    nmbs_error err = nmbs_read_input_registers(&client->core, address, quantity, registers_out);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Read input registers error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_read_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                  uint16_t address, uint16_t quantity,
+                                  nmbs_bitfield coils_out, k_timeout_t lock_timeout)
+{
+    if (client == NULL || coils_out == NULL) {
+        LOG_ERR("Read coils failed: NULL parameter");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Read coils lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Reading coils: unit=%u, addr=%u, qty=%u", unit_id, address, quantity);
+    nmbs_error err = nmbs_read_coils(&client->core, address, quantity, coils_out);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Read coils error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_read_discrete_inputs_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                            uint16_t address, uint16_t quantity,
+                                            nmbs_bitfield inputs_out, k_timeout_t lock_timeout)
+{
+    if (client == NULL || inputs_out == NULL) {
+        LOG_ERR("Read discrete inputs failed: NULL parameter");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Read discrete inputs lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Reading discrete inputs: unit=%u, addr=%u, qty=%u", unit_id, address, quantity);
+    nmbs_error err = nmbs_read_discrete_inputs(&client->core, address, quantity, inputs_out);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Read discrete inputs error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_write_single_coil_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                        uint16_t address, bool value, k_timeout_t lock_timeout)
+{
+    if (client == NULL) {
+        LOG_ERR("Write single coil failed: NULL client");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Write single coil lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Writing single coil: unit=%u, addr=%u, val=%d", unit_id, address, value ? 1 : 0);
+    nmbs_error err = nmbs_write_single_coil(&client->core, address, value);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Write single coil error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_write_single_register_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                            uint16_t address, uint16_t value, k_timeout_t lock_timeout)
+{
+    if (client == NULL) {
+        LOG_ERR("Write single register failed: NULL client");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Write single register lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Writing single register: unit=%u, addr=%u, val=0x%04X", unit_id, address, value);
+    nmbs_error err = nmbs_write_single_register(&client->core, address, value);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Write single register error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_write_multiple_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                           uint16_t address, uint16_t quantity,
+                                           const nmbs_bitfield coils, k_timeout_t lock_timeout)
+{
+    if (client == NULL || coils == NULL) {
+        LOG_ERR("Write multiple coils failed: NULL parameter");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Write multiple coils lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Writing multiple coils: unit=%u, addr=%u, qty=%u", unit_id, address, quantity);
+    nmbs_error err = nmbs_write_multiple_coils(&client->core, address, quantity, coils);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Write multiple coils error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_write_multiple_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                               uint16_t address, uint16_t quantity,
+                                               const uint16_t *registers, k_timeout_t lock_timeout)
+{
+    if (client == NULL || registers == NULL) {
+        LOG_ERR("Write multiple registers failed: NULL parameter");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Write multiple registers lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Writing multiple registers: unit=%u, addr=%u, qty=%u", unit_id, address, quantity);
+    nmbs_error err = nmbs_write_multiple_registers(&client->core, address, quantity, registers);
+    client_record_error(client, err);
+    k_mutex_unlock(&client->lock);
+
+    if (err != NMBS_ERROR_NONE) {
+        LOG_ERR("Write multiple registers error: %d", err);
+    }
+
+    return nmbs_z_error_to_errno(err);
+}
+
+int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
+                                           uint16_t read_address, uint16_t read_quantity,
+                                           uint16_t *registers_out, uint16_t write_address,
+                                           uint16_t write_quantity, const uint16_t *registers,
+                                           k_timeout_t lock_timeout)
+{
+    if (client == NULL || registers_out == NULL || registers == NULL) {
+        LOG_ERR("Read/write registers failed: NULL parameter");
+        return -EINVAL;
+    }
+
+    int ret = client_lock(client, lock_timeout);
+    if (ret != 0) {
+        LOG_DBG("Read/write registers lock failed: %d", ret);
+        return ret;
+    }
+
+    client->core.dest_address_rtu = unit_id;
+    LOG_DBG("Read/write registers: unit=%u, rd=%u/%u, wr=%u/%u", unit_id, read_address, read_quantity,
+            write_address, write_quantity);
     nmbs_error err = nmbs_read_write_registers(&client->core, read_address, read_quantity, registers_out,
                                                write_address, write_quantity, registers);
     client_record_error(client, err);
