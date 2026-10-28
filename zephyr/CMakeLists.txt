@@ -23,6 +23,9 @@ if(CONFIG_NANOMODBUS)
   zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_TRANSPORT_SERIAL src/nanomodbus_z_transport_serial.c)
   zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_TRANSPORT_TCP src/nanomodbus_z_transport_tcp.c)
 
+  # Shell integration
+  zephyr_library_sources_ifdef(CONFIG_NANOMODBUS_SHELL src/nanomodbus_z_shell.c)
+
   # Role Disabling
   if(NOT CONFIG_NANOMODBUS_SERVER)
     zephyr_compile_definitions(NMBS_SERVER_DISABLED)

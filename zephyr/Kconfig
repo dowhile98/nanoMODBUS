@@ -223,6 +223,72 @@ config NANOMODBUS_SERVER_TCP_BACKLOG
 
 endif # NANOMODBUS_SERVER_TCP
 
+menuconfig NANOMODBUS_SHELL
+	bool "nanoMODBUS Shell commands"
+	depends on SHELL && NANOMODBUS
+	default y
+	help
+	  Enable interactive Zephyr Shell CLI commands for nanoMODBUS. Provides
+	  diagnostic inspection, bus monitoring, and manual Modbus read/write
+	  operations over console interfaces.
+
+if NANOMODBUS_SHELL
+
+config NANOMODBUS_SHELL_CLIENT
+	bool "nanoMODBUS Shell Client commands"
+	depends on NANOMODBUS_CLIENT
+	default y
+	help
+	  Enable Modbus client commands in the shell:
+	  - read-coils (FC 01)
+	  - read-discrete (FC 02)
+	  - read-holding (FC 03)
+	  - read-input (FC 04)
+	  - write-coil (FC 05)
+	  - write-register (FC 06)
+	  - write-coils (FC 15)
+	  - write-registers (FC 16)
+
+config NANOMODBUS_SHELL_SERVER
+	bool "nanoMODBUS Shell Server diagnostics"
+	depends on NANOMODBUS_SERVER
+	default y
+	help
+	  Enable Modbus server diagnostic commands in the shell:
+	  - status
+	  - reset-stats
+
+config NANOMODBUS_SHELL_MAX_CLIENTS
+	int "Maximum registered client instances"
+	depends on NANOMODBUS_SHELL_CLIENT
+	default 4
+	range 1 8
+	help
+	  Maximum number of named client instances that can be registered
+	  in the static shell registry.
+
+config NANOMODBUS_SHELL_MAX_SERVERS
+	int "Maximum registered server instances"
+	depends on NANOMODBUS_SHELL_SERVER
+	default 4
+	range 1 8
+	help
+	  Maximum number of named server instances that can be registered
+	  in the static shell registry.
+
+config NANOMODBUS_SHELL_MAX_DATA_WORDS
+	int "Maximum data words per CLI transaction"
+	depends on NANOMODBUS_SHELL_CLIENT
+	default 64
+	range 1 125
+	help
+	  Upper limit of 16-bit register words or coils that can be read or
+	  written in a single shell command. This bounds the local stack buffer
+	  allocated during command execution. The Modbus protocol limit for
+	  Read Holding Registers (FC 03) is 125 registers (250 bytes).
+
+endif # NANOMODBUS_SHELL
+
 comment "Buffer and Protocol Tuning"
 
 config NANOMODBUS_DIAGNOSTICS
