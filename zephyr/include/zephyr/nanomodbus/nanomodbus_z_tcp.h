@@ -15,8 +15,8 @@
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/socket.h>
 
-#include <nanomodbus.h>
 #include "nanomodbus_z.h"
+#include <nanomodbus.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,26 +46,23 @@ typedef struct nmbs_z_tcp_transport {
  * @param platform_conf Out-parameter populated with nanoMODBUS platform callbacks.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
-                                 const char *server_ip,
-                                 uint16_t port,
-                                 int32_t timeout_ms,
-                                 nmbs_platform_conf *platform_conf);
+int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t* transport, const char* server_ip, uint16_t port,
+                                 int32_t timeout_ms, nmbs_platform_conf* platform_conf);
 
 /**
  * @brief Platform read callback for Modbus TCP transport.
  */
-int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg);
+int32_t nmbs_z_transport_tcp_read(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg);
 
 /**
  * @brief Platform write callback for Modbus TCP transport.
  */
-int32_t nmbs_z_transport_tcp_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg);
+int32_t nmbs_z_transport_tcp_write(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg);
 
 /**
  * @brief Platform flush callback for Modbus TCP transport.
  */
-void nmbs_z_transport_tcp_flush(nmbs_t *nmbs, void *arg);
+void nmbs_z_transport_tcp_flush(nmbs_t* nmbs, void* arg);
 
 /**
  * @brief Disconnect and close TCP client transport.
@@ -73,7 +70,7 @@ void nmbs_z_transport_tcp_flush(nmbs_t *nmbs, void *arg);
  * @param transport Pointer to transport context.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_tcp_transport_close(nmbs_z_tcp_transport_t *transport);
+int nmbs_z_tcp_transport_close(nmbs_z_tcp_transport_t* transport);
 
 #ifdef CONFIG_NANOMODBUS_SERVER_TCP
 
@@ -104,7 +101,7 @@ typedef struct nmbs_z_server_tcp {
     struct k_sem stop_sem;
     struct k_sem ready_sem;
     nmbs_z_tcp_transport_t client_transport;
-    struct nmbs_z_stats stats;           /**< Server diagnostic statistics */
+    struct nmbs_z_stats stats; /**< Server diagnostic statistics */
 } nmbs_z_server_tcp_t;
 
 /**
@@ -127,9 +124,7 @@ typedef struct nmbs_z_server_tcp {
  * @param port TCP port to listen on.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
-                           const nmbs_callbacks *callbacks,
-                           uint16_t port);
+int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t* server, const nmbs_callbacks* callbacks, uint16_t port);
 
 /**
  * @brief Start the Modbus TCP Server thread.
@@ -145,9 +140,7 @@ int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
  * @return 0 on success, -EALREADY if the server is already running, other
  *         negative errno on failure.
  */
-int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
-                            const nmbs_callbacks *callbacks,
-                            uint16_t port);
+int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t* server, const nmbs_callbacks* callbacks, uint16_t port);
 
 /**
  * @brief Stop the Modbus TCP Server thread and close listening and client sockets.
@@ -155,7 +148,7 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
  * @param server Pointer to server context.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server);
+int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t* server);
 
 /**
  * @brief Retrieve runtime diagnostic statistics from a TCP Server instance.
@@ -164,7 +157,7 @@ int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server);
  * @param stats Pointer to output statistics structure.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z_stats *stats);
+int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t* server, struct nmbs_z_stats* stats);
 
 /**
  * @brief Reset runtime diagnostic statistics on a TCP Server instance.
@@ -172,7 +165,7 @@ int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t *server);
+int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t* server);
 
 #endif /* CONFIG_NANOMODBUS_SERVER_TCP */
 

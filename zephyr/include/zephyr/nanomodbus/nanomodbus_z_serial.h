@@ -11,15 +11,15 @@
 #ifndef ZEPHYR_INCLUDE_NANOMODBUS_Z_SERIAL_H_
 #define ZEPHYR_INCLUDE_NANOMODBUS_Z_SERIAL_H_
 
-#include <zephyr/kernel.h>
+#include "nanomodbus_z.h"
+#include <nanomodbus.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/ring_buffer.h>
 #include <zephyr/sys/util.h>
-#include <nanomodbus.h>
-#include "nanomodbus_z.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,26 +90,26 @@ struct nmbs_z_serial_transport;
  * context in EXTERNAL mode. It is meant for lightweight work only, such as
  * restarting a frame-silence timer.
  */
-typedef void (*nmbs_z_serial_rx_cb_t)(struct nmbs_z_serial_transport *transport, const uint8_t *data, size_t len,
-                                      void *user_data);
+typedef void (*nmbs_z_serial_rx_cb_t)(struct nmbs_z_serial_transport* transport, const uint8_t* data, size_t len,
+                                      void* user_data);
 
 /**
  * @brief Configuration for Modbus Serial RTU transport.
  */
 typedef struct nmbs_z_serial_transport_config {
-    const struct device *uart_dev;       /**< UART device handle */
-    struct gpio_dt_spec de_gpio;         /**< RS-485 DE GPIO pin spec (optional) */
-    struct gpio_dt_spec re_gpio;         /**< RS-485 RE GPIO pin spec (optional, active-low) */
-    uint32_t baud_rate;                  /**< Baud rate in bps */
-    uint32_t de_pre_delay_us;            /**< Guard time before TX with DE high (us, GPIO mode) */
-    uint32_t de_post_delay_us;           /**< Guard time after TX before DE low (us, GPIO mode) */
-    uint8_t parity;                      /**< enum uart_config_parity, 0 = none */
-    uint8_t stop_bits;                   /**< enum uart_config_stop_bits, 0 = 1 stop bit */
-    uint8_t data_bits;                   /**< enum uart_config_data_bits, 0 = 8 data bits */
-    nmbs_z_serial_rx_mode_t rx_mode;     /**< Receive path selection */
-    nmbs_z_serial_de_mode_t de_mode;     /**< Driver-enable control selection */
-    nmbs_z_serial_rx_cb_t rx_cb;         /**< Optional receive notification callback */
-    void *rx_cb_user_data;               /**< User data passed to @ref rx_cb */
+    const struct device* uart_dev;   /**< UART device handle */
+    struct gpio_dt_spec de_gpio;     /**< RS-485 DE GPIO pin spec (optional) */
+    struct gpio_dt_spec re_gpio;     /**< RS-485 RE GPIO pin spec (optional, active-low) */
+    uint32_t baud_rate;              /**< Baud rate in bps */
+    uint32_t de_pre_delay_us;        /**< Guard time before TX with DE high (us, GPIO mode) */
+    uint32_t de_post_delay_us;       /**< Guard time after TX before DE low (us, GPIO mode) */
+    uint8_t parity;                  /**< enum uart_config_parity, 0 = none */
+    uint8_t stop_bits;               /**< enum uart_config_stop_bits, 0 = 1 stop bit */
+    uint8_t data_bits;               /**< enum uart_config_data_bits, 0 = 8 data bits */
+    nmbs_z_serial_rx_mode_t rx_mode; /**< Receive path selection */
+    nmbs_z_serial_de_mode_t de_mode; /**< Driver-enable control selection */
+    nmbs_z_serial_rx_cb_t rx_cb;     /**< Optional receive notification callback */
+    void* rx_cb_user_data;           /**< User data passed to @ref rx_cb */
 } nmbs_z_serial_transport_config_t;
 
 /**
@@ -119,84 +119,69 @@ typedef struct nmbs_z_serial_transport {
     nmbs_z_serial_transport_config_t cfg;
     struct ring_buf rx_rb;
     uint8_t rx_buffer[CONFIG_NANOMODBUS_SERIAL_RX_BUF_SIZE];
-    uint32_t t1_5_us;                    /**< 1.5 char silence interval in us */
-    uint32_t t3_5_us;                    /**< 3.5 char silence interval in us */
-    struct k_sem rx_sem;                 /**< Semaphore signaling received bytes */
-    struct k_spinlock rb_lock;           /**< Protects ring buffer reset against RX ISR */
-    atomic_t rx_overflow;                /**< Set when a frame did not fit in rx_buffer */
-    atomic_t rx_active;                  /**< IRQ/ASYNC receiver currently enabled */
-    atomic_t rx_resync_count;            /**< Frames discarded because of a > t1.5 gap */
-    uint32_t last_rx_cycles;             /**< Cycle counter of the last queued byte */
+    uint32_t t1_5_us;          /**< 1.5 char silence interval in us */
+    uint32_t t3_5_us;          /**< 3.5 char silence interval in us */
+    struct k_sem rx_sem;       /**< Semaphore signaling received bytes */
+    struct k_spinlock rb_lock; /**< Protects ring buffer reset against RX ISR */
+    atomic_t rx_overflow;      /**< Set when a frame did not fit in rx_buffer */
+    atomic_t rx_active;        /**< IRQ/ASYNC receiver currently enabled */
+    atomic_t rx_resync_count;  /**< Frames discarded because of a > t1.5 gap */
+    uint32_t last_rx_cycles;   /**< Cycle counter of the last queued byte */
     uint8_t async_rx_buffer[2][CONFIG_NANOMODBUS_SERIAL_ASYNC_RX_BUF_SIZE];
-    uint8_t async_next_buf;              /**< Buffer index to hand to the driver next */
-    struct k_work rx_restart_work;       /**< Deferred recovery after a UART RX error */
-    bool de_hw;                          /**< UART hardware driver-enable is active */
-    bool de_gpio;                        /**< Software GPIO driver-enable is active */
-    bool re_gpio;                        /**< Software GPIO receiver-enable is active */
+    uint8_t async_next_buf;        /**< Buffer index to hand to the driver next */
+    struct k_work rx_restart_work; /**< Deferred recovery after a UART RX error */
+    bool de_hw;                    /**< UART hardware driver-enable is active */
+    bool de_gpio;                  /**< Software GPIO driver-enable is active */
+    bool re_gpio;                  /**< Software GPIO receiver-enable is active */
 } nmbs_z_serial_transport_t;
 
 /** @cond INTERNAL_HIDDEN */
-#define _NMBS_Z_UART_NODE_FROM_MODBUS(node_id) \
-    COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), \
-        (DT_PARENT(node_id)), \
-        (COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), \
-            (DT_PARENT(node_id)), \
-            (node_id))))
+#define _NMBS_Z_UART_NODE_FROM_MODBUS(node_id)                                                                         \
+    COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), (DT_PARENT(node_id)),                                  \
+                (COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), (DT_PARENT(node_id)), (node_id))))
 
-#define _NMBS_Z_DT_BAUD_RATE(node_id) \
-    DT_PROP_OR(node_id, current_speed, \
-        DT_PROP_OR(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id), current_speed, 115200))
+#define _NMBS_Z_DT_BAUD_RATE(node_id)                                                                                  \
+    DT_PROP_OR(node_id, current_speed, DT_PROP_OR(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id), current_speed, 115200))
 
-#define _NMBS_Z_DT_DE_GPIO(node_id) \
-    COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), \
-        (GPIO_DT_SPEC_GET_OR(node_id, de_gpios, {0})), \
-        (COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), \
-            (GPIO_DT_SPEC_GET_OR(node_id, de_gpios, {0})), \
-            (COND_CODE_1(DT_NODE_HAS_PROP(node_id, de_gpios), \
-                (GPIO_DT_SPEC_GET(node_id, de_gpios)), \
-                (COND_CODE_1(DT_HAS_ALIAS(modbus_de), \
-                    (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_de), gpios, {0})), \
-                    ({0}))))))))
+#define _NMBS_Z_DT_DE_GPIO(node_id)                                                                                    \
+    COND_CODE_1(                                                                                                       \
+            DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), (GPIO_DT_SPEC_GET_OR(node_id, de_gpios, {0})),             \
+            (COND_CODE_1(                                                                                              \
+                    DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), (GPIO_DT_SPEC_GET_OR(node_id, de_gpios, {0})),  \
+                    (COND_CODE_1(DT_NODE_HAS_PROP(node_id, de_gpios), (GPIO_DT_SPEC_GET(node_id, de_gpios)),           \
+                                 (COND_CODE_1(DT_HAS_ALIAS(modbus_de),                                                 \
+                                              (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_de), gpios, {0})), ({0}))))))))
 
-#define _NMBS_Z_DT_RE_GPIO(node_id) \
-    COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), \
-        (GPIO_DT_SPEC_GET_OR(node_id, re_gpios, {0})), \
-        (COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), \
-            (GPIO_DT_SPEC_GET_OR(node_id, re_gpios, {0})), \
-            (COND_CODE_1(DT_NODE_HAS_PROP(node_id, re_gpios), \
-                (GPIO_DT_SPEC_GET(node_id, re_gpios)), \
-                (COND_CODE_1(DT_HAS_ALIAS(modbus_re), \
-                    (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_re), gpios, {0})), \
-                    ({0}))))))))
+#define _NMBS_Z_DT_RE_GPIO(node_id)                                                                                    \
+    COND_CODE_1(                                                                                                       \
+            DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), (GPIO_DT_SPEC_GET_OR(node_id, re_gpios, {0})),             \
+            (COND_CODE_1(                                                                                              \
+                    DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), (GPIO_DT_SPEC_GET_OR(node_id, re_gpios, {0})),  \
+                    (COND_CODE_1(DT_NODE_HAS_PROP(node_id, re_gpios), (GPIO_DT_SPEC_GET(node_id, re_gpios)),           \
+                                 (COND_CODE_1(DT_HAS_ALIAS(modbus_re),                                                 \
+                                              (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_re), gpios, {0})), ({0}))))))))
 
-#define _NMBS_Z_DT_DE_PRE_DELAY(node_id) \
-    DT_PROP_OR(node_id, de_pre_delay_us, 0)
+#define _NMBS_Z_DT_DE_PRE_DELAY(node_id) DT_PROP_OR(node_id, de_pre_delay_us, 0)
 
-#define _NMBS_Z_DT_DE_POST_DELAY(node_id) \
-    DT_PROP_OR(node_id, de_post_delay_us, 0)
+#define _NMBS_Z_DT_DE_POST_DELAY(node_id) DT_PROP_OR(node_id, de_post_delay_us, 0)
 
-#define _NMBS_Z_DT_DE_MODE(node_id) \
-    _CONCAT(NMBS_Z_SERIAL_DE_, DT_STRING_UPPER_TOKEN_OR(node_id, de_mode, AUTO))
+#define _NMBS_Z_DT_DE_MODE(node_id) _CONCAT(NMBS_Z_SERIAL_DE_, DT_STRING_UPPER_TOKEN_OR(node_id, de_mode, AUTO))
 
-#define _NMBS_Z_RX_TOKEN_ASYNC(node_id)    NMBS_Z_SERIAL_RX_ASYNC
-#define _NMBS_Z_RX_TOKEN_IRQ(node_id)      NMBS_Z_SERIAL_RX_IRQ
+#define _NMBS_Z_RX_TOKEN_ASYNC(node_id) NMBS_Z_SERIAL_RX_ASYNC
+#define _NMBS_Z_RX_TOKEN_IRQ(node_id) NMBS_Z_SERIAL_RX_IRQ
 #define _NMBS_Z_RX_TOKEN_EXTERNAL(node_id) NMBS_Z_SERIAL_RX_EXTERNAL
-#define _NMBS_Z_RX_TOKEN_AUTO(node_id)     _NMBS_Z_RX_MODE_AUTO_RESOLVE(node_id)
+#define _NMBS_Z_RX_TOKEN_AUTO(node_id) _NMBS_Z_RX_MODE_AUTO_RESOLVE(node_id)
 
-#define _NMBS_Z_RX_MODE_AUTO_RESOLVE(node_id) \
-    ((IS_ENABLED(CONFIG_UART_ASYNC_API) && !IS_ENABLED(CONFIG_DCACHE) && \
-      (DT_NODE_HAS_PROP(node_id, dmas) || \
-       DT_NODE_HAS_PROP(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id), dmas))) \
-     ? NMBS_Z_SERIAL_RX_ASYNC \
-     : (IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN) \
-        ? NMBS_Z_SERIAL_RX_IRQ \
-        : NMBS_Z_SERIAL_RX_EXTERNAL))
+#define _NMBS_Z_RX_MODE_AUTO_RESOLVE(node_id)                                                                          \
+    ((IS_ENABLED(CONFIG_UART_ASYNC_API) && !IS_ENABLED(CONFIG_DCACHE) &&                                               \
+      (DT_NODE_HAS_PROP(node_id, dmas) || DT_NODE_HAS_PROP(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id), dmas)))             \
+             ? NMBS_Z_SERIAL_RX_ASYNC                                                                                  \
+             : (IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN) ? NMBS_Z_SERIAL_RX_IRQ : NMBS_Z_SERIAL_RX_EXTERNAL))
 
 #define _NMBS_Z_RX_TOKEN_EXPAND(token, node_id) _NMBS_Z_RX_TOKEN_##token(node_id)
 #define _NMBS_Z_RX_TOKEN_DISPATCH(token, node_id) _NMBS_Z_RX_TOKEN_EXPAND(token, node_id)
 
-#define _NMBS_Z_DT_RX_MODE(node_id) \
-    _NMBS_Z_RX_TOKEN_DISPATCH(DT_STRING_UPPER_TOKEN_OR(node_id, rx_mode, AUTO), node_id)
+#define _NMBS_Z_DT_RX_MODE(node_id) _NMBS_Z_RX_TOKEN_DISPATCH(DT_STRING_UPPER_TOKEN_OR(node_id, rx_mode, AUTO), node_id)
 /** @endcond */
 
 /**
@@ -207,21 +192,14 @@ typedef struct nmbs_z_serial_transport {
  *
  * @param node_id Devicetree node identifier.
  */
-#define NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(node_id) \
-    { \
-        .uart_dev = DEVICE_DT_GET(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id)), \
-        .de_gpio = _NMBS_Z_DT_DE_GPIO(node_id), \
-        .re_gpio = _NMBS_Z_DT_RE_GPIO(node_id), \
-        .baud_rate = _NMBS_Z_DT_BAUD_RATE(node_id), \
-        .de_pre_delay_us = _NMBS_Z_DT_DE_PRE_DELAY(node_id), \
-        .de_post_delay_us = _NMBS_Z_DT_DE_POST_DELAY(node_id), \
-        .parity = UART_CFG_PARITY_NONE, \
-        .stop_bits = UART_CFG_STOP_BITS_1, \
-        .data_bits = UART_CFG_DATA_BITS_8, \
-        .rx_mode = _NMBS_Z_DT_RX_MODE(node_id), \
-        .de_mode = _NMBS_Z_DT_DE_MODE(node_id), \
-        .rx_cb = NULL, \
-        .rx_cb_user_data = NULL, \
+#define NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(node_id)                                                                     \
+    {                                                                                                                  \
+        .uart_dev = DEVICE_DT_GET(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id)), .de_gpio = _NMBS_Z_DT_DE_GPIO(node_id),     \
+        .re_gpio = _NMBS_Z_DT_RE_GPIO(node_id), .baud_rate = _NMBS_Z_DT_BAUD_RATE(node_id),                            \
+        .de_pre_delay_us = _NMBS_Z_DT_DE_PRE_DELAY(node_id), .de_post_delay_us = _NMBS_Z_DT_DE_POST_DELAY(node_id),    \
+        .parity = UART_CFG_PARITY_NONE, .stop_bits = UART_CFG_STOP_BITS_1, .data_bits = UART_CFG_DATA_BITS_8,          \
+        .rx_mode = _NMBS_Z_DT_RX_MODE(node_id), .de_mode = _NMBS_Z_DT_DE_MODE(node_id), .rx_cb = NULL,                 \
+        .rx_cb_user_data = NULL,                                                                                       \
     }
 
 /**
@@ -229,10 +207,10 @@ typedef struct nmbs_z_serial_transport {
  *
  * @param inst Instance index for "nanomodbus,serial" (or "zephyr,modbus-serial").
  */
-#define NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT_INST(inst) \
-    COND_CODE_1(DT_NODE_EXISTS(DT_INST(inst, nanomodbus_serial)), \
-        (NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(DT_INST(inst, nanomodbus_serial))), \
-        (NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(DT_INST(inst, zephyr_modbus_serial))))
+#define NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT_INST(inst)                                                                   \
+    COND_CODE_1(DT_NODE_EXISTS(DT_INST(inst, nanomodbus_serial)),                                                      \
+                (NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(DT_INST(inst, nanomodbus_serial))),                                 \
+                (NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(DT_INST(inst, zephyr_modbus_serial))))
 
 /**
  * @brief Read Modbus slave ID from a child node's reg property.
@@ -240,10 +218,8 @@ typedef struct nmbs_z_serial_transport {
  * @param node_id Devicetree node identifier of a Modbus child slave node.
  * @return Slave ID (uint8_t compatible integer).
  */
-#define NMBS_Z_DT_SLAVE_ID(node_id) \
-    COND_CODE_1(DT_NODE_HAS_PROP(node_id, reg), \
-        (DT_PROP(node_id, reg)), \
-        (DT_REG_ADDR(node_id)))
+#define NMBS_Z_DT_SLAVE_ID(node_id)                                                                                    \
+    COND_CODE_1(DT_NODE_HAS_PROP(node_id, reg), (DT_PROP(node_id, reg)), (DT_REG_ADDR(node_id)))
 
 /**
  * @brief Calculate Modbus RTU character silence intervals (t1.5 and t3.5) in microseconds.
@@ -259,7 +235,7 @@ typedef struct nmbs_z_serial_transport {
  * @param t1_5_us Out-parameter for t1.5 interval in microseconds.
  * @param t3_5_us Out-parameter for t3.5 interval in microseconds.
  */
-void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t *t3_5_us);
+void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t* t1_5_us, uint32_t* t3_5_us);
 
 /**
  * @brief Initialize a Serial RTU transport instance.
@@ -278,9 +254,8 @@ void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t 
  * @param platform_conf Out-parameter populated with nanoMODBUS platform callbacks.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
-                                 const nmbs_z_serial_transport_config_t *config,
-                                 nmbs_platform_conf *platform_conf);
+int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t* transport, const nmbs_z_serial_transport_config_t* config,
+                                 nmbs_platform_conf* platform_conf);
 
 /**
  * @brief Start IRQ or ASYNC reception.
@@ -291,7 +266,7 @@ int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
  * @param transport Pointer to transport context.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_serial_transport_start_rx(nmbs_z_serial_transport_t *transport);
+int nmbs_z_serial_transport_start_rx(nmbs_z_serial_transport_t* transport);
 
 /**
  * @brief Stop IRQ or ASYNC reception.
@@ -299,14 +274,14 @@ int nmbs_z_serial_transport_start_rx(nmbs_z_serial_transport_t *transport);
  * @param transport Pointer to transport context.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t *transport);
+int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t* transport);
 
 /**
  * @brief Stop reception, release the GPIO and drain pending data.
  *
  * @param transport Pointer to transport context.
  */
-void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t *transport);
+void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t* transport);
 
 /**
  * @brief Reconfigure UART line settings and recalculate RTU frame timings.
@@ -321,23 +296,22 @@ void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t *transport);
  * @param uart_cfg New UART line configuration, or NULL to re-apply/flush only.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t *transport,
-                                        const struct uart_config *uart_cfg);
+int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t* transport, const struct uart_config* uart_cfg);
 
 /**
  * @brief Platform read callback for Serial RTU transport.
  */
-int32_t nmbs_z_transport_serial_read(uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg);
+int32_t nmbs_z_transport_serial_read(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg);
 
 /**
  * @brief Platform write callback for Serial RTU transport with RS-485 DE pin control.
  */
-int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg);
+int32_t nmbs_z_transport_serial_write(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg);
 
 /**
  * @brief Platform flush callback for Serial RTU transport.
  */
-void nmbs_z_transport_serial_flush(nmbs_t *nmbs, void *arg);
+void nmbs_z_transport_serial_flush(nmbs_t* nmbs, void* arg);
 
 /**
  * @brief Feed received bytes into the Serial RTU transport ring buffer and signal waiting reader.
@@ -355,7 +329,7 @@ void nmbs_z_transport_serial_flush(nmbs_t *nmbs, void *arg);
  * @param length Number of bytes to put.
  * @return Number of bytes actually written to ring buffer.
  */
-int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const uint8_t *data, uint32_t length);
+int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t* transport, const uint8_t* data, uint32_t length);
 
 #ifdef CONFIG_NANOMODBUS_SERVER_RTU
 
@@ -380,13 +354,13 @@ typedef struct nmbs_z_server_rtu {
     nmbs_z_serial_transport_t transport;
     struct k_timer silence_timer;
     struct k_work work;
-    struct k_work_q work_q;              /**< Dedicated queue for request processing */
+    struct k_work_q work_q; /**< Dedicated queue for request processing */
     K_KERNEL_STACK_MEMBER(work_q_stack, CONFIG_NANOMODBUS_SERVER_RTU_WQ_STACK_SIZE);
     uint8_t server_address;
-    atomic_t running;                    /**< Server engine accepts requests */
-    atomic_t rx_pending;                 /**< Bytes arrived during the last poll */
-    atomic_t init_magic;                 /**< Guards against double initialization */
-    struct nmbs_z_stats stats;           /**< Server diagnostic statistics */
+    atomic_t running;          /**< Server engine accepts requests */
+    atomic_t rx_pending;       /**< Bytes arrived during the last poll */
+    atomic_t init_magic;       /**< Guards against double initialization */
+    struct nmbs_z_stats stats; /**< Server diagnostic statistics */
 } nmbs_z_server_rtu_t;
 
 /**
@@ -406,10 +380,8 @@ typedef struct nmbs_z_server_rtu {
  * @return 0 on success, -EALREADY if the instance was already initialized,
  *         other negative errno on failure.
  */
-int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
-                           const nmbs_z_serial_transport_config_t *config,
-                           const nmbs_callbacks *callbacks,
-                           uint8_t server_address);
+int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t* server, const nmbs_z_serial_transport_config_t* config,
+                           const nmbs_callbacks* callbacks, uint8_t server_address);
 
 /**
  * @brief Start the Modbus RTU Server engine.
@@ -420,7 +392,7 @@ int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t *server);
+int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t* server);
 
 /**
  * @brief Stop the Modbus RTU Server engine.
@@ -433,7 +405,7 @@ int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t *server);
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t *server);
+int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t* server);
 
 /**
  * @brief Feed a received byte into the RTU Server engine and restart the silence timer.
@@ -444,7 +416,7 @@ int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t *server);
  * @param server Pointer to server instance.
  * @param byte Received byte.
  */
-void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t *server, uint8_t byte);
+void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t* server, uint8_t byte);
 
 /**
  * @brief Feed a received buffer into the RTU Server engine and restart the silence timer.
@@ -453,7 +425,7 @@ void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t *server, uint8_t byte);
  * @param data Received bytes.
  * @param length Number of bytes.
  */
-void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t *server, const uint8_t *data, uint32_t length);
+void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t* server, const uint8_t* data, uint32_t length);
 
 /**
  * @brief Retrieve runtime diagnostic statistics from an RTU Server instance.
@@ -462,7 +434,7 @@ void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t *server, const uint8_t *data,
  * @param stats Pointer to output statistics structure.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z_stats *stats);
+int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t* server, struct nmbs_z_stats* stats);
 
 /**
  * @brief Reset runtime diagnostic statistics on an RTU Server instance.
@@ -470,7 +442,7 @@ int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server);
+int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t* server);
 
 /**
  * @brief Set the Modbus RTU server slave address.
@@ -481,7 +453,7 @@ int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server);
  * @param slave_id Modbus RTU slave address (1-247).
  * @return 0 on success, -EINVAL on invalid parameter.
  */
-int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t *server, uint8_t slave_id);
+int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t* server, uint8_t slave_id);
 
 /**
  * @brief Get the current Modbus RTU server slave address.
@@ -489,7 +461,7 @@ int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t *server, uint8_t slave_id)
  * @param server Pointer to server instance.
  * @return Slave address (1-247), or 0 if server is NULL.
  */
-uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t *server);
+uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t* server);
 
 /**
  * @brief Reconfigure RTU server UART line settings and/or slave address.
@@ -503,9 +475,7 @@ uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t *server);
  * @param slave_id New slave address (1-247), or 0 to keep current slave address.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_rtu_reconfigure(nmbs_z_server_rtu_t *server,
-                                  const struct uart_config *uart_cfg,
-                                  uint8_t slave_id);
+int nmbs_z_server_rtu_reconfigure(nmbs_z_server_rtu_t* server, const struct uart_config* uart_cfg, uint8_t slave_id);
 
 #endif /* CONFIG_NANOMODBUS_SERVER_RTU */
 

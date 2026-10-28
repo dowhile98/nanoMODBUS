@@ -1522,8 +1522,10 @@ void test_core_improvements(void) {
     expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_ACKNOWLEDGE), "modbus exception 5: acknowledge") == 0);
     expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_SERVER_DEVICE_BUSY), "modbus exception 6: server device busy") == 0);
     expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_MEMORY_PARITY_ERROR), "modbus exception 8: memory parity error") == 0);
-    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_GATEWAY_PATH_UNAVAILABLE), "modbus exception 10: gateway path unavailable") == 0);
-    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_GATEWAY_TARGET_DEVICE_FAILED_TO_RESPOND), "modbus exception 11: gateway target device failed to respond") == 0);
+    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_GATEWAY_PATH_UNAVAILABLE),
+                  "modbus exception 10: gateway path unavailable") == 0);
+    expect(strcmp(nmbs_strerror(NMBS_EXCEPTION_GATEWAY_TARGET_DEVICE_FAILED_TO_RESPOND),
+                  "modbus exception 11: gateway target device failed to respond") == 0);
 
     should("reject TCP MBAP length == 255 on server");
     nmbs_t srv;

@@ -3,17 +3,15 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/ztest.h>
-#include <zephyr/net/socket.h>
-#include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
+#include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/ztest.h>
 
 static uint16_t server_holding_registers[16];
 
-static nmbs_error mock_read_holding_registers(uint16_t address, uint16_t quantity,
-                                             uint16_t *registers_out, uint8_t unit_id,
-                                             void *arg)
-{
+static nmbs_error mock_read_holding_registers(uint16_t address, uint16_t quantity, uint16_t* registers_out,
+                                              uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -28,9 +26,7 @@ static nmbs_error mock_read_holding_registers(uint16_t address, uint16_t quantit
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error mock_write_single_register(uint16_t address, uint16_t value,
-                                            uint8_t unit_id, void *arg)
-{
+static nmbs_error mock_write_single_register(uint16_t address, uint16_t value, uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -42,8 +38,7 @@ static nmbs_error mock_write_single_register(uint16_t address, uint16_t value,
     return NMBS_ERROR_NONE;
 }
 
-static void server_tcp_before(void *fixture)
-{
+static void server_tcp_before(void* fixture) {
     ARG_UNUSED(fixture);
     for (int i = 0; i < ARRAY_SIZE(server_holding_registers); i++) {
         server_holding_registers[i] = 100 + i;
@@ -51,8 +46,7 @@ static void server_tcp_before(void *fixture)
 }
 
 /* Test 1: Full round-trip read and write over Modbus TCP */
-ZTEST(nanomodbus_server_tcp, test_tcp_server_client_roundtrip)
-{
+ZTEST(nanomodbus_server_tcp, test_tcp_server_client_roundtrip) {
     static nmbs_z_server_tcp_t server;
     nmbs_callbacks cbs = {0};
     cbs.read_holding_registers = mock_read_holding_registers;
@@ -95,8 +89,7 @@ ZTEST(nanomodbus_server_tcp, test_tcp_server_client_roundtrip)
 }
 
 /* Test 2 (Review Focus 4): Abrupt client abort mid-stream and clean server recovery */
-ZTEST(nanomodbus_server_tcp, test_tcp_server_client_abort_recovery)
-{
+ZTEST(nanomodbus_server_tcp, test_tcp_server_client_abort_recovery) {
     static nmbs_z_server_tcp_t server;
     nmbs_callbacks cbs = {0};
     cbs.read_holding_registers = mock_read_holding_registers;
@@ -147,8 +140,7 @@ ZTEST(nanomodbus_server_tcp, test_tcp_server_client_abort_recovery)
 }
 
 /* Test 3: Graceful server shutdown */
-ZTEST(nanomodbus_server_tcp, test_tcp_server_graceful_shutdown)
-{
+ZTEST(nanomodbus_server_tcp, test_tcp_server_graceful_shutdown) {
     static nmbs_z_server_tcp_t server;
     nmbs_callbacks cbs = {0};
     cbs.read_holding_registers = mock_read_holding_registers;
@@ -167,8 +159,7 @@ ZTEST(nanomodbus_server_tcp, test_tcp_server_graceful_shutdown)
 }
 
 /* Test 4: Modbus TCP Diagnostics Counters */
-ZTEST(nanomodbus_server_tcp, test_tcp_server_diagnostics_stats)
-{
+ZTEST(nanomodbus_server_tcp, test_tcp_server_diagnostics_stats) {
 #if defined(CONFIG_NANOMODBUS_DIAGNOSTICS)
     static nmbs_z_server_tcp_t server;
     nmbs_callbacks cbs = {0};

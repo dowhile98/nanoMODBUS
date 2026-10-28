@@ -11,9 +11,9 @@
 #ifndef ZEPHYR_INCLUDE_NANOMODBUS_Z_H_
 #define ZEPHYR_INCLUDE_NANOMODBUS_Z_H_
 
-#include <stdint.h>
-#include <stdbool.h>
 #include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <zephyr/kernel.h>
 #ifndef CONFIG_NANOMODBUS_SERVER
 #ifndef NMBS_SERVER_DISABLED
@@ -179,7 +179,7 @@ nmbs_error errno_to_nmbs_error(int err);
  * @param err The nmbs_error code.
  * @return Constant string description.
  */
-const char *nmbs_z_strerror(nmbs_error err);
+const char* nmbs_z_strerror(nmbs_error err);
 
 /**
  * @brief Modbus server runtime diagnostics counters.
@@ -202,7 +202,7 @@ typedef struct nmbs_z_server_tcp nmbs_z_server_tcp_t;
  * @param stats Pointer to output statistics structure.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z_stats *stats);
+int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t* server, struct nmbs_z_stats* stats);
 
 /**
  * @brief Reset runtime diagnostic statistics on an RTU Server instance.
@@ -210,7 +210,7 @@ int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server);
+int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t* server);
 
 /**
  * @brief Retrieve runtime diagnostic statistics from a TCP Server instance.
@@ -219,7 +219,7 @@ int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server);
  * @param stats Pointer to output statistics structure.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z_stats *stats);
+int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t* server, struct nmbs_z_stats* stats);
 
 /**
  * @brief Reset runtime diagnostic statistics on a TCP Server instance.
@@ -227,7 +227,7 @@ int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z
  * @param server Pointer to server instance.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t *server);
+int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t* server);
 
 #ifdef CONFIG_NANOMODBUS_CLIENT
 
@@ -235,12 +235,12 @@ int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t *server);
  * @brief Thread-safe nanoMODBUS Zephyr Client instance.
  */
 typedef struct nmbs_z_client {
-    struct k_mutex lock;             /**< Mutex protecting core against concurrent callers */
-    nmbs_t core;                     /**< Core nanoMODBUS client instance */
-    nmbs_platform_conf platform;     /**< Platform transport configuration */
-    int32_t read_timeout_ms;         /**< First-byte/response timeout in milliseconds */
-    int32_t byte_timeout_ms;         /**< Inter-byte timeout in milliseconds */
-    nmbs_error last_error;           /**< Raw result of the last request, including exception codes */
+    struct k_mutex lock;         /**< Mutex protecting core against concurrent callers */
+    nmbs_t core;                 /**< Core nanoMODBUS client instance */
+    nmbs_platform_conf platform; /**< Platform transport configuration */
+    int32_t read_timeout_ms;     /**< First-byte/response timeout in milliseconds */
+    int32_t byte_timeout_ms;     /**< Inter-byte timeout in milliseconds */
+    nmbs_error last_error;       /**< Raw result of the last request, including exception codes */
 } nmbs_z_client_t;
 
 /**
@@ -254,7 +254,7 @@ typedef struct nmbs_z_client {
  * @param transport Platform transport configuration.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transport);
+int nmbs_z_client_init(nmbs_z_client_t* client, const nmbs_platform_conf* transport);
 
 /**
  * @brief Set the client response and inter-byte timeouts.
@@ -266,7 +266,7 @@ int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transp
  *                        Negative values mean infinite.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_set_timeouts(nmbs_z_client_t *client, int32_t read_timeout_ms, int32_t byte_timeout_ms);
+int nmbs_z_client_set_timeouts(nmbs_z_client_t* client, int32_t read_timeout_ms, int32_t byte_timeout_ms);
 
 /**
  * @brief Return the raw nmbs_error produced by the most recent client call.
@@ -288,7 +288,7 @@ int nmbs_z_client_set_timeouts(nmbs_z_client_t *client, int32_t read_timeout_ms,
  * @return Raw nmbs_error of the last operation, NMBS_ERROR_INVALID_ARGUMENT if
  *         @p client is NULL.
  */
-nmbs_error nmbs_z_client_get_last_error(const nmbs_z_client_t *client);
+nmbs_error nmbs_z_client_get_last_error(const nmbs_z_client_t* client);
 
 /**
  * @brief Set the target server RTU address for subsequent client requests.
@@ -298,61 +298,54 @@ nmbs_error nmbs_z_client_get_last_error(const nmbs_z_client_t *client);
  * @param timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on lock timeout.
  */
-int nmbs_z_client_set_target_address(nmbs_z_client_t *client, uint8_t unit_id, k_timeout_t timeout);
+int nmbs_z_client_set_target_address(nmbs_z_client_t* client, uint8_t unit_id, k_timeout_t timeout);
 
 /**
  * @brief Thread-safe Read Holding Registers (FC 03).
  */
-int nmbs_z_client_read_holding_registers(nmbs_z_client_t *client, uint16_t address,
-                                        uint16_t quantity, uint16_t *registers_out,
-                                        k_timeout_t lock_timeout);
+int nmbs_z_client_read_holding_registers(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                         uint16_t* registers_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Input Registers (FC 04).
  */
-int nmbs_z_client_read_input_registers(nmbs_z_client_t *client, uint16_t address,
-                                      uint16_t quantity, uint16_t *registers_out,
-                                      k_timeout_t lock_timeout);
+int nmbs_z_client_read_input_registers(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                       uint16_t* registers_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Coils (FC 01).
  */
-int nmbs_z_client_read_coils(nmbs_z_client_t *client, uint16_t address,
-                             uint16_t quantity, nmbs_bitfield coils_out,
+int nmbs_z_client_read_coils(nmbs_z_client_t* client, uint16_t address, uint16_t quantity, nmbs_bitfield coils_out,
                              k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Discrete Inputs (FC 02).
  */
-int nmbs_z_client_read_discrete_inputs(nmbs_z_client_t *client, uint16_t address,
-                                       uint16_t quantity, nmbs_bitfield inputs_out,
-                                       k_timeout_t lock_timeout);
+int nmbs_z_client_read_discrete_inputs(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                       nmbs_bitfield inputs_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Single Coil (FC 05).
  */
-int nmbs_z_client_write_single_coil(nmbs_z_client_t *client, uint16_t address,
-                                    bool value, k_timeout_t lock_timeout);
+int nmbs_z_client_write_single_coil(nmbs_z_client_t* client, uint16_t address, bool value, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Single Register (FC 06).
  */
-int nmbs_z_client_write_single_register(nmbs_z_client_t *client, uint16_t address,
-                                        uint16_t value, k_timeout_t lock_timeout);
+int nmbs_z_client_write_single_register(nmbs_z_client_t* client, uint16_t address, uint16_t value,
+                                        k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Multiple Coils (FC 15).
  */
-int nmbs_z_client_write_multiple_coils(nmbs_z_client_t *client, uint16_t address,
-                                       uint16_t quantity, const nmbs_bitfield coils,
-                                       k_timeout_t lock_timeout);
+int nmbs_z_client_write_multiple_coils(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                       const nmbs_bitfield coils, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Multiple Registers (FC 16).
  */
-int nmbs_z_client_write_multiple_registers(nmbs_z_client_t *client, uint16_t address,
-                                           uint16_t quantity, const uint16_t *registers,
-                                           k_timeout_t lock_timeout);
+int nmbs_z_client_write_multiple_registers(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                           const uint16_t* registers, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read File Record (FC 20).
@@ -366,9 +359,8 @@ int nmbs_z_client_write_multiple_registers(nmbs_z_client_t *client, uint16_t add
  * @return 0 on success, negative errno on failure. Use
  *         nmbs_z_client_get_last_error() for the unmodified error code.
  */
-int nmbs_z_client_read_file_record(nmbs_z_client_t *client, uint16_t file_number,
-                                   uint16_t record_number, uint16_t *registers_out,
-                                   uint16_t quantity, k_timeout_t lock_timeout);
+int nmbs_z_client_read_file_record(nmbs_z_client_t* client, uint16_t file_number, uint16_t record_number,
+                                   uint16_t* registers_out, uint16_t quantity, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write File Record (FC 21).
@@ -381,9 +373,8 @@ int nmbs_z_client_read_file_record(nmbs_z_client_t *client, uint16_t file_number
  * @param lock_timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_write_file_record(nmbs_z_client_t *client, uint16_t file_number,
-                                    uint16_t record_number, const uint16_t *registers,
-                                    uint16_t quantity, k_timeout_t lock_timeout);
+int nmbs_z_client_write_file_record(nmbs_z_client_t* client, uint16_t file_number, uint16_t record_number,
+                                    const uint16_t* registers, uint16_t quantity, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read/Write Multiple Registers (FC 23).
@@ -401,73 +392,65 @@ int nmbs_z_client_write_file_record(nmbs_z_client_t *client, uint16_t file_numbe
  * @param lock_timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_read_write_registers(nmbs_z_client_t *client, uint16_t read_address,
-                                       uint16_t read_quantity, uint16_t *registers_out,
-                                       uint16_t write_address, uint16_t write_quantity,
-                                       const uint16_t *registers, k_timeout_t lock_timeout);
+int nmbs_z_client_read_write_registers(nmbs_z_client_t* client, uint16_t read_address, uint16_t read_quantity,
+                                       uint16_t* registers_out, uint16_t write_address, uint16_t write_quantity,
+                                       const uint16_t* registers, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Holding Registers with explicit unit ID (FC 03).
  */
-int nmbs_z_client_read_holding_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                              uint16_t address, uint16_t quantity,
-                                              uint16_t *registers_out, k_timeout_t lock_timeout);
+int nmbs_z_client_read_holding_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                              uint16_t quantity, uint16_t* registers_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Input Registers with explicit unit ID (FC 04).
  */
-int nmbs_z_client_read_input_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                            uint16_t address, uint16_t quantity,
-                                            uint16_t *registers_out, k_timeout_t lock_timeout);
+int nmbs_z_client_read_input_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                            uint16_t quantity, uint16_t* registers_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Coils with explicit unit ID (FC 01).
  */
-int nmbs_z_client_read_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                  uint16_t address, uint16_t quantity,
+int nmbs_z_client_read_coils_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address, uint16_t quantity,
                                   nmbs_bitfield coils_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Discrete Inputs with explicit unit ID (FC 02).
  */
-int nmbs_z_client_read_discrete_inputs_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                            uint16_t address, uint16_t quantity,
-                                            nmbs_bitfield inputs_out, k_timeout_t lock_timeout);
+int nmbs_z_client_read_discrete_inputs_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                            uint16_t quantity, nmbs_bitfield inputs_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Single Coil with explicit unit ID (FC 05).
  */
-int nmbs_z_client_write_single_coil_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                        uint16_t address, bool value, k_timeout_t lock_timeout);
+int nmbs_z_client_write_single_coil_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address, bool value,
+                                         k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Single Register with explicit unit ID (FC 06).
  */
-int nmbs_z_client_write_single_register_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                            uint16_t address, uint16_t value, k_timeout_t lock_timeout);
+int nmbs_z_client_write_single_register_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address, uint16_t value,
+                                             k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Multiple Coils with explicit unit ID (FC 15).
  */
-int nmbs_z_client_write_multiple_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                           uint16_t address, uint16_t quantity,
-                                           const nmbs_bitfield coils, k_timeout_t lock_timeout);
+int nmbs_z_client_write_multiple_coils_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                            uint16_t quantity, const nmbs_bitfield coils, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Write Multiple Registers with explicit unit ID (FC 16).
  */
-int nmbs_z_client_write_multiple_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                               uint16_t address, uint16_t quantity,
-                                               const uint16_t *registers, k_timeout_t lock_timeout);
+int nmbs_z_client_write_multiple_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                                uint16_t quantity, const uint16_t* registers, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read/Write Multiple Registers with explicit unit ID (FC 23).
  */
-int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                           uint16_t read_address, uint16_t read_quantity,
-                                           uint16_t *registers_out, uint16_t write_address,
-                                           uint16_t write_quantity, const uint16_t *registers,
-                                           k_timeout_t lock_timeout);
+int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t read_address,
+                                            uint16_t read_quantity, uint16_t* registers_out, uint16_t write_address,
+                                            uint16_t write_quantity, const uint16_t* registers,
+                                            k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Device Identification, basic objects (FC 43/14, code 1).
@@ -480,10 +463,8 @@ int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t *client, uint8_t uni
  * @param lock_timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_read_device_identification_basic(nmbs_z_client_t *client,
-                                                   char *vendor_name, char *product_code,
-                                                   char *major_minor_revision,
-                                                   uint8_t buffers_length,
+int nmbs_z_client_read_device_identification_basic(nmbs_z_client_t* client, char* vendor_name, char* product_code,
+                                                   char* major_minor_revision, uint8_t buffers_length,
                                                    k_timeout_t lock_timeout);
 
 /**
@@ -498,12 +479,9 @@ int nmbs_z_client_read_device_identification_basic(nmbs_z_client_t *client,
  * @param lock_timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t *client,
-                                                     char *vendor_url, char *product_name,
-                                                     char *model_name,
-                                                     char *user_application_name,
-                                                     uint8_t buffers_length,
-                                                     k_timeout_t lock_timeout);
+int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t* client, char* vendor_url, char* product_name,
+                                                     char* model_name, char* user_application_name,
+                                                     uint8_t buffers_length, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Device Identification, extended objects (FC 43/14, code 3).
@@ -518,12 +496,9 @@ int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t *client,
  * @param lock_timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t *client,
-                                                      uint8_t object_id_start, uint8_t *ids,
-                                                      char **buffers, uint8_t ids_length,
-                                                      uint8_t buffer_length,
-                                                      uint8_t *objects_count_out,
-                                                      k_timeout_t lock_timeout);
+int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t* client, uint8_t object_id_start, uint8_t* ids,
+                                                      char** buffers, uint8_t ids_length, uint8_t buffer_length,
+                                                      uint8_t* objects_count_out, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe Read Device Identification, single object (FC 43/14, code 4).
@@ -535,9 +510,8 @@ int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t *client,
  * @param lock_timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_read_device_identification(nmbs_z_client_t *client, uint8_t object_id,
-                                             char *buffer, uint8_t buffer_length,
-                                             k_timeout_t lock_timeout);
+int nmbs_z_client_read_device_identification(nmbs_z_client_t* client, uint8_t object_id, char* buffer,
+                                             uint8_t buffer_length, k_timeout_t lock_timeout);
 
 /**
  * @brief Thread-safe raw Modbus PDU exchange.
@@ -558,9 +532,8 @@ int nmbs_z_client_read_device_identification(nmbs_z_client_t *client, uint8_t ob
  * @param lock_timeout Lock acquisition timeout.
  * @return 0 on success, negative errno on failure.
  */
-int nmbs_z_client_raw_pdu(nmbs_z_client_t *client, uint8_t fc, const uint8_t *data,
-                          uint16_t data_length, uint8_t *response,
-                          uint8_t response_length, k_timeout_t lock_timeout);
+int nmbs_z_client_raw_pdu(nmbs_z_client_t* client, uint8_t fc, const uint8_t* data, uint16_t data_length,
+                          uint8_t* response, uint8_t response_length, k_timeout_t lock_timeout);
 
 #endif /* CONFIG_NANOMODBUS_CLIENT */
 

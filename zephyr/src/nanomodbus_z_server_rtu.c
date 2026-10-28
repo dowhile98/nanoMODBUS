@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/nanomodbus/nanomodbus_z_serial.h>
-#include <zephyr/logging/log.h>
 #include <string.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/nanomodbus/nanomodbus_z_serial.h>
 
 #ifdef CONFIG_NANOMODBUS_SERVER_RTU
 
@@ -14,12 +14,11 @@ LOG_MODULE_REGISTER(nmbs_server_rtu, CONFIG_NANOMODBUS_LOG_LEVEL);
 #define NMBS_Z_SERVER_RTU_INIT_MAGIC 0x4E4D4253 /* 'NMBS' */
 
 static const struct k_work_queue_config rtu_work_q_config = {
-    .name = "nmbs_rtu_wq",
+        .name = "nmbs_rtu_wq",
 };
 
-static void on_silence_timer_expired(struct k_timer *timer)
-{
-    nmbs_z_server_rtu_t *server = CONTAINER_OF(timer, nmbs_z_server_rtu_t, silence_timer);
+static void on_silence_timer_expired(struct k_timer* timer) {
+    nmbs_z_server_rtu_t* server = CONTAINER_OF(timer, nmbs_z_server_rtu_t, silence_timer);
 
     if (!atomic_get(&server->running)) {
         return;
@@ -36,13 +35,12 @@ static void on_silence_timer_expired(struct k_timer *timer)
     }
 }
 
-static int32_t server_rtu_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
-    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
+static int32_t server_rtu_write(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
+    nmbs_z_serial_transport_t* transport = (nmbs_z_serial_transport_t*) arg;
     int32_t ret = nmbs_z_transport_serial_write(buf, count, byte_timeout_ms, transport);
 #ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
     if (ret > 0) {
-        nmbs_z_server_rtu_t *server = CONTAINER_OF(transport, nmbs_z_server_rtu_t, transport);
+        nmbs_z_server_rtu_t* server = CONTAINER_OF(transport, nmbs_z_server_rtu_t, transport);
         server->stats.tx_frames++;
         if (count >= 2 && (buf[1] & 0x80)) {
             server->stats.exceptions++;
@@ -52,9 +50,8 @@ static int32_t server_rtu_write(const uint8_t *buf, uint16_t count, int32_t byte
     return ret;
 }
 
-static void on_server_work(struct k_work *work)
-{
-    nmbs_z_server_rtu_t *server = CONTAINER_OF(work, nmbs_z_server_rtu_t, work);
+static void on_server_work(struct k_work* work) {
+    nmbs_z_server_rtu_t* server = CONTAINER_OF(work, nmbs_z_server_rtu_t, work);
 
     if (!atomic_get(&server->running)) {
         return;
@@ -65,9 +62,11 @@ static void on_server_work(struct k_work *work)
 #ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
     if (err == NMBS_ERROR_CRC) {
         server->stats.crc_errors++;
-    } else if (err == NMBS_ERROR_TIMEOUT) {
+    }
+    else if (err == NMBS_ERROR_TIMEOUT) {
         server->stats.timeouts++;
-    } else if (err == NMBS_ERROR_NONE) {
+    }
+    else if (err == NMBS_ERROR_NONE) {
         if (server->core.msg.buf_idx > 0) {
             server->stats.rx_frames++;
         }
@@ -86,14 +85,12 @@ static void on_server_work(struct k_work *work)
     }
 }
 
-static void on_transport_rx(nmbs_z_serial_transport_t *transport, const uint8_t *data, size_t len,
-                            void *user_data)
-{
+static void on_transport_rx(nmbs_z_serial_transport_t* transport, const uint8_t* data, size_t len, void* user_data) {
     ARG_UNUSED(transport);
     ARG_UNUSED(data);
     ARG_UNUSED(len);
 
-    nmbs_z_server_rtu_t *server = (nmbs_z_server_rtu_t *)user_data;
+    nmbs_z_server_rtu_t* server = (nmbs_z_server_rtu_t*) user_data;
 
     if (server == NULL || !atomic_get(&server->running)) {
         return;
@@ -103,11 +100,8 @@ static void on_transport_rx(nmbs_z_serial_transport_t *transport, const uint8_t 
     k_timer_start(&server->silence_timer, K_USEC(server->transport.t3_5_us), K_NO_WAIT);
 }
 
-int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
-                           const nmbs_z_serial_transport_config_t *config,
-                           const nmbs_callbacks *callbacks,
-                           uint8_t server_address)
-{
+int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t* server, const nmbs_z_serial_transport_config_t* config,
+                           const nmbs_callbacks* callbacks, uint8_t server_address) {
     if (!server || !config || !callbacks) {
         return -EINVAL;
     }
@@ -177,8 +171,7 @@ int nmbs_z_server_rtu_init(nmbs_z_server_rtu_t *server,
     return 0;
 }
 
-int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t *server)
-{
+int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t* server) {
     if (!server) {
         return -EINVAL;
     }
@@ -198,8 +191,7 @@ int nmbs_z_server_rtu_start(nmbs_z_server_rtu_t *server)
     return 0;
 }
 
-int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t *server)
-{
+int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t* server) {
     if (!server) {
         return -EINVAL;
     }
@@ -208,30 +200,27 @@ int nmbs_z_server_rtu_stop(nmbs_z_server_rtu_t *server)
     k_timer_stop(&server->silence_timer);
 
     struct k_work_sync sync;
-    (void)k_work_cancel_sync(&server->work, &sync);
+    (void) k_work_cancel_sync(&server->work, &sync);
 
-    (void)nmbs_z_serial_transport_stop_rx(&server->transport);
+    (void) nmbs_z_serial_transport_stop_rx(&server->transport);
     nmbs_z_transport_serial_flush(NULL, &server->transport);
 
     return 0;
 }
 
-void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t *server, const uint8_t *data, uint32_t length)
-{
+void nmbs_z_server_rtu_rx_data(nmbs_z_server_rtu_t* server, const uint8_t* data, uint32_t length) {
     if (server == NULL || data == NULL || !atomic_get(&server->running)) {
         return;
     }
 
-    (void)nmbs_z_serial_transport_rx_put(&server->transport, data, length);
+    (void) nmbs_z_serial_transport_rx_put(&server->transport, data, length);
 }
 
-void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t *server, uint8_t byte)
-{
+void nmbs_z_server_rtu_rx_byte(nmbs_z_server_rtu_t* server, uint8_t byte) {
     nmbs_z_server_rtu_rx_data(server, &byte, 1);
 }
 
-int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z_stats *stats)
-{
+int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t* server, struct nmbs_z_stats* stats) {
     if (!server || !stats) {
         return -EINVAL;
     }
@@ -243,8 +232,7 @@ int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z
 #endif
 }
 
-int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server)
-{
+int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t* server) {
     if (!server) {
         return -EINVAL;
     }
@@ -256,8 +244,7 @@ int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server)
 #endif
 }
 
-int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t *server, uint8_t slave_id)
-{
+int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t* server, uint8_t slave_id) {
     if (!server) {
         return -EINVAL;
     }
@@ -272,8 +259,7 @@ int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t *server, uint8_t slave_id)
     return 0;
 }
 
-uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t *server)
-{
+uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t* server) {
     if (!server) {
         return 0;
     }
@@ -281,10 +267,7 @@ uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t *server)
     return server->server_address;
 }
 
-int nmbs_z_server_rtu_reconfigure(nmbs_z_server_rtu_t *server,
-                                  const struct uart_config *uart_cfg,
-                                  uint8_t slave_id)
-{
+int nmbs_z_server_rtu_reconfigure(nmbs_z_server_rtu_t* server, const struct uart_config* uart_cfg, uint8_t slave_id) {
     if (!server) {
         return -EINVAL;
     }

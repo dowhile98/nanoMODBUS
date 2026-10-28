@@ -3,17 +3,16 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/nanomodbus/nanomodbus_z_serial.h>
-#include <zephyr/logging/log.h>
-#include <zephyr/sys/time_units.h>
 #include <string.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/nanomodbus/nanomodbus_z_serial.h>
+#include <zephyr/sys/time_units.h>
 
 LOG_MODULE_REGISTER(nmbs_serial, CONFIG_NANOMODBUS_LOG_LEVEL);
 
 #define NMBS_SERIAL_CHAR_BITS 11U
 
-void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t *t3_5_us)
-{
+void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t* t1_5_us, uint32_t* t3_5_us) {
     if (!t1_5_us || !t3_5_us) {
         return;
     }
@@ -25,9 +24,10 @@ void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t 
     }
 
     if (baud_rate <= 19200) {
-        *t1_5_us = (uint32_t)(16500000UL / baud_rate);
-        *t3_5_us = (uint32_t)(38500000UL / baud_rate);
-    } else {
+        *t1_5_us = (uint32_t) (16500000UL / baud_rate);
+        *t3_5_us = (uint32_t) (38500000UL / baud_rate);
+    }
+    else {
         *t1_5_us = 750;
         *t3_5_us = 1750;
     }
@@ -39,9 +39,8 @@ void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t 
  * UART_CFG_FLOW_CTRL_RS485 is what keeps the hardware driver-enable
  * (de-enable) active, so overwriting it would silently disable RS-485 DE.
  */
-static int serial_apply_line_config(nmbs_z_serial_transport_t *transport)
-{
-    const struct device *dev = transport->cfg.uart_dev;
+static int serial_apply_line_config(nmbs_z_serial_transport_t* transport) {
+    const struct device* dev = transport->cfg.uart_dev;
 
     if (dev == NULL) {
         return 0;
@@ -60,16 +59,16 @@ static int serial_apply_line_config(nmbs_z_serial_transport_t *transport)
 
     /* Nothing to change? Then avoid touching a possibly busy peripheral. */
     if (uart_cfg.baudrate == transport->cfg.baud_rate &&
-        uart_cfg.parity == (enum uart_config_parity)transport->cfg.parity &&
-        uart_cfg.stop_bits == (enum uart_config_stop_bits)transport->cfg.stop_bits &&
-        uart_cfg.data_bits == (enum uart_config_data_bits)transport->cfg.data_bits) {
+        uart_cfg.parity == (enum uart_config_parity) transport->cfg.parity &&
+        uart_cfg.stop_bits == (enum uart_config_stop_bits) transport->cfg.stop_bits &&
+        uart_cfg.data_bits == (enum uart_config_data_bits) transport->cfg.data_bits) {
         return 0;
     }
 
     uart_cfg.baudrate = transport->cfg.baud_rate;
-    uart_cfg.parity = (enum uart_config_parity)transport->cfg.parity;
-    uart_cfg.stop_bits = (enum uart_config_stop_bits)transport->cfg.stop_bits;
-    uart_cfg.data_bits = (enum uart_config_data_bits)transport->cfg.data_bits;
+    uart_cfg.parity = (enum uart_config_parity) transport->cfg.parity;
+    uart_cfg.stop_bits = (enum uart_config_stop_bits) transport->cfg.stop_bits;
+    uart_cfg.data_bits = (enum uart_config_data_bits) transport->cfg.data_bits;
 
     ret = uart_configure(dev, &uart_cfg);
     if (ret == -ENOSYS || ret == -ENOTSUP) {
@@ -87,9 +86,8 @@ static int serial_apply_line_config(nmbs_z_serial_transport_t *transport)
     return 0;
 }
 
-static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
-{
-    const nmbs_z_serial_transport_config_t *config = &transport->cfg;
+static int serial_resolve_de(nmbs_z_serial_transport_t* transport) {
+    const nmbs_z_serial_transport_config_t* config = &transport->cfg;
     bool hw_de = false;
     bool gpio_de = false;
 
@@ -104,7 +102,8 @@ static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
 
             if (ret == 0) {
                 hw_de = (uart_cfg.flow_ctrl == UART_CFG_FLOW_CTRL_RS485);
-            } else if (config->de_mode == NMBS_Z_SERIAL_DE_HARDWARE) {
+            }
+            else if (config->de_mode == NMBS_Z_SERIAL_DE_HARDWARE) {
                 /* Runtime configuration queries are optional. When the
                  * driver cannot report its configuration, trust that the
                  * devicetree enabled hardware DE.
@@ -125,7 +124,8 @@ static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
             return -EINVAL;
         }
         gpio_de = true;
-    } else if (config->de_mode == NMBS_Z_SERIAL_DE_AUTO && !hw_de && config->de_gpio.port != NULL) {
+    }
+    else if (config->de_mode == NMBS_Z_SERIAL_DE_AUTO && !hw_de && config->de_gpio.port != NULL) {
         gpio_de = true;
     }
 
@@ -148,7 +148,8 @@ static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
 
     if (hw_de) {
         LOG_DBG("Using UART hardware RS-485 driver-enable");
-    } else if (gpio_de) {
+    }
+    else if (gpio_de) {
         LOG_DBG("Using GPIO RS-485 driver-enable");
     }
 
@@ -173,9 +174,8 @@ static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
 }
 
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN)
-static void serial_irq_cb(const struct device *dev, void *user_data)
-{
-    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)user_data;
+static void serial_irq_cb(const struct device* dev, void* user_data) {
+    nmbs_z_serial_transport_t* transport = (nmbs_z_serial_transport_t*) user_data;
     uint8_t chunk[32];
 
     uart_irq_update(dev);
@@ -187,13 +187,12 @@ static void serial_irq_cb(const struct device *dev, void *user_data)
             break;
         }
 
-        (void)nmbs_z_serial_transport_rx_put(transport, chunk, (uint32_t)read);
+        (void) nmbs_z_serial_transport_rx_put(transport, chunk, (uint32_t) read);
     }
 }
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
-static void serial_async_rearm(nmbs_z_serial_transport_t *transport)
-{
+static void serial_async_rearm(nmbs_z_serial_transport_t* transport) {
     if (!atomic_get(&transport->rx_active)) {
         return;
     }
@@ -201,7 +200,7 @@ static void serial_async_rearm(nmbs_z_serial_transport_t *transport)
     transport->async_next_buf = 1;
 
     int ret = uart_rx_enable(transport->cfg.uart_dev, transport->async_rx_buffer[0],
-                             sizeof(transport->async_rx_buffer[0]), (int32_t)transport->t1_5_us);
+                             sizeof(transport->async_rx_buffer[0]), (int32_t) transport->t1_5_us);
     if (ret == 0) {
         return;
     }
@@ -212,7 +211,8 @@ static void serial_async_rearm(nmbs_z_serial_transport_t *transport)
          */
         LOG_ERR("Async RX buffer is not in non-cacheable memory; place the UART "
                 "buffers in a nocache region / disable CONFIG_DCACHE");
-    } else {
+    }
+    else {
         LOG_ERR("Failed to enable asynchronous UART RX (%d)", ret);
     }
 
@@ -226,10 +226,8 @@ static void serial_async_rearm(nmbs_z_serial_transport_t *transport)
  * recovery is deferred to the system workqueue. The resulting UART_RX_DISABLED
  * event re-arms reception.
  */
-static void serial_async_restart_work_handler(struct k_work *work)
-{
-    nmbs_z_serial_transport_t *transport =
-        CONTAINER_OF(work, nmbs_z_serial_transport_t, rx_restart_work);
+static void serial_async_restart_work_handler(struct k_work* work) {
+    nmbs_z_serial_transport_t* transport = CONTAINER_OF(work, nmbs_z_serial_transport_t, rx_restart_work);
 
     if (!atomic_get(&transport->rx_active)) {
         return;
@@ -247,54 +245,52 @@ static void serial_async_restart_work_handler(struct k_work *work)
     }
 }
 
-static void serial_async_cb(const struct device *dev, struct uart_event *evt, void *user_data)
-{
-    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)user_data;
+static void serial_async_cb(const struct device* dev, struct uart_event* evt, void* user_data) {
+    nmbs_z_serial_transport_t* transport = (nmbs_z_serial_transport_t*) user_data;
 
     switch (evt->type) {
-    case UART_RX_RDY:
-        if (atomic_get(&transport->rx_active) && evt->data.rx.len > 0) {
-            (void)nmbs_z_serial_transport_rx_put(transport, evt->data.rx.buf + evt->data.rx.offset,
-                                                 evt->data.rx.len);
+        case UART_RX_RDY:
+            if (atomic_get(&transport->rx_active) && evt->data.rx.len > 0) {
+                (void) nmbs_z_serial_transport_rx_put(transport, evt->data.rx.buf + evt->data.rx.offset,
+                                                      evt->data.rx.len);
+            }
+            break;
+
+        case UART_RX_BUF_REQUEST: {
+            uint8_t idx = transport->async_next_buf;
+            int ret = uart_rx_buf_rsp(dev, transport->async_rx_buffer[idx], sizeof(transport->async_rx_buffer[idx]));
+
+            if (ret == 0) {
+                transport->async_next_buf = idx ? 0 : 1;
+            }
+            else {
+                LOG_WRN("Failed to provide UART RX buffer (%d)", ret);
+            }
+            break;
         }
-        break;
 
-    case UART_RX_BUF_REQUEST: {
-        uint8_t idx = transport->async_next_buf;
-        int ret = uart_rx_buf_rsp(dev, transport->async_rx_buffer[idx],
-                                  sizeof(transport->async_rx_buffer[idx]));
+        case UART_RX_BUF_RELEASED:
+            break;
 
-        if (ret == 0) {
-            transport->async_next_buf = idx ? 0 : 1;
-        } else {
-            LOG_WRN("Failed to provide UART RX buffer (%d)", ret);
-        }
-        break;
-    }
+        case UART_RX_DISABLED:
+            if (atomic_get(&transport->rx_active)) {
+                serial_async_rearm(transport);
+            }
+            break;
 
-    case UART_RX_BUF_RELEASED:
-        break;
+        case UART_RX_STOPPED:
+            LOG_WRN("UART RX stopped (reason 0x%x), scheduling restart", evt->data.rx_stop.reason);
+            if (atomic_get(&transport->rx_active)) {
+                (void) k_work_submit(&transport->rx_restart_work);
+            }
+            break;
 
-    case UART_RX_DISABLED:
-        if (atomic_get(&transport->rx_active)) {
-            serial_async_rearm(transport);
-        }
-        break;
-
-    case UART_RX_STOPPED:
-        LOG_WRN("UART RX stopped (reason 0x%x), scheduling restart", evt->data.rx_stop.reason);
-        if (atomic_get(&transport->rx_active)) {
-            (void)k_work_submit(&transport->rx_restart_work);
-        }
-        break;
-
-    default:
-        break;
+        default:
+            break;
     }
 }
 
-int nmbs_z_serial_transport_start_rx(nmbs_z_serial_transport_t *transport)
-{
+int nmbs_z_serial_transport_start_rx(nmbs_z_serial_transport_t* transport) {
     if (!transport || transport->cfg.uart_dev == NULL) {
         return -EINVAL;
     }
@@ -348,8 +344,7 @@ int nmbs_z_serial_transport_start_rx(nmbs_z_serial_transport_t *transport)
     return -EINVAL;
 }
 
-int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t *transport)
-{
+int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t* transport) {
     if (!transport) {
         return -EINVAL;
     }
@@ -362,11 +357,12 @@ int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t *transport)
      * that is about to be started again.
      */
     if (k_is_in_isr()) {
-        (void)k_work_cancel(&transport->rx_restart_work);
-    } else {
+        (void) k_work_cancel(&transport->rx_restart_work);
+    }
+    else {
         struct k_work_sync sync;
 
-        (void)k_work_cancel_sync(&transport->rx_restart_work, &sync);
+        (void) k_work_cancel_sync(&transport->rx_restart_work, &sync);
     }
 
     if (transport->cfg.uart_dev == NULL) {
@@ -377,17 +373,16 @@ int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t *transport)
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN)
         uart_irq_rx_disable(transport->cfg.uart_dev);
 #endif
-    } else if (transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_ASYNC) {
-        (void)uart_rx_disable(transport->cfg.uart_dev);
+    }
+    else if (transport->cfg.rx_mode == NMBS_Z_SERIAL_RX_ASYNC) {
+        (void) uart_rx_disable(transport->cfg.uart_dev);
     }
 
     return 0;
 }
 
-int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
-                                 const nmbs_z_serial_transport_config_t *config,
-                                 nmbs_platform_conf *platform_conf)
-{
+int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t* transport, const nmbs_z_serial_transport_config_t* config,
+                                 nmbs_platform_conf* platform_conf) {
     if (!transport || !config || !platform_conf) {
         return -EINVAL;
     }
@@ -457,13 +452,12 @@ int nmbs_z_serial_transport_init(nmbs_z_serial_transport_t *transport,
     return 0;
 }
 
-void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t *transport)
-{
+void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t* transport) {
     if (!transport) {
         return;
     }
 
-    (void)nmbs_z_serial_transport_stop_rx(transport);
+    (void) nmbs_z_serial_transport_stop_rx(transport);
 
     k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
 
@@ -473,16 +467,14 @@ void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t *transport)
     atomic_set(&transport->rx_overflow, 0);
 
     if (transport->de_gpio) {
-        (void)gpio_pin_set_dt(&transport->cfg.de_gpio, 0);
+        (void) gpio_pin_set_dt(&transport->cfg.de_gpio, 0);
     }
     if (transport->re_gpio) {
-        (void)gpio_pin_set_dt(&transport->cfg.re_gpio, 1);
+        (void) gpio_pin_set_dt(&transport->cfg.re_gpio, 1);
     }
 }
 
-int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t *transport,
-                                        const struct uart_config *uart_cfg)
-{
+int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t* transport, const struct uart_config* uart_cfg) {
     if (!transport) {
         return -EINVAL;
     }
@@ -493,15 +485,15 @@ int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t *transport,
         }
 
         transport->cfg.baud_rate = uart_cfg->baudrate;
-        transport->cfg.parity = (uint8_t)uart_cfg->parity;
-        transport->cfg.stop_bits = (uint8_t)uart_cfg->stop_bits;
-        transport->cfg.data_bits = (uint8_t)uart_cfg->data_bits;
+        transport->cfg.parity = (uint8_t) uart_cfg->parity;
+        transport->cfg.stop_bits = (uint8_t) uart_cfg->stop_bits;
+        transport->cfg.data_bits = (uint8_t) uart_cfg->data_bits;
     }
 
     bool was_active = (atomic_get(&transport->rx_active) != 0);
 
     if (was_active) {
-        (void)nmbs_z_serial_transport_stop_rx(transport);
+        (void) nmbs_z_serial_transport_stop_rx(transport);
     }
 
     int ret = 0;
@@ -509,7 +501,7 @@ int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t *transport,
         ret = serial_apply_line_config(transport);
         if (ret != 0) {
             if (was_active) {
-                (void)nmbs_z_serial_transport_start_rx(transport);
+                (void) nmbs_z_serial_transport_start_rx(transport);
             }
             return ret;
         }
@@ -529,8 +521,7 @@ int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t *transport,
     return 0;
 }
 
-int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
+int32_t nmbs_z_transport_serial_write(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
     ARG_UNUSED(byte_timeout_ms);
 
     if (!arg || !buf) {
@@ -541,7 +532,7 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
         return 0;
     }
 
-    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
+    nmbs_z_serial_transport_t* transport = (nmbs_z_serial_transport_t*) arg;
     bool gpio_de = transport->de_gpio;
     bool gpio_re = transport->re_gpio;
 
@@ -577,7 +568,7 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
 
     /* 3. Wait for the shift register to drain before releasing DE. */
     if (transport->cfg.uart_dev != NULL && transport->cfg.baud_rate > 0) {
-        uint32_t char_time_us = (uint32_t)((NMBS_SERIAL_CHAR_BITS * 1000000UL) / transport->cfg.baud_rate);
+        uint32_t char_time_us = (uint32_t) ((NMBS_SERIAL_CHAR_BITS * 1000000UL) / transport->cfg.baud_rate);
 
         if (char_time_us > 0) {
             k_busy_wait(char_time_us);
@@ -596,11 +587,10 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
         gpio_pin_set_dt(&transport->cfg.re_gpio, 1);
     }
 
-    return (int32_t)count;
+    return (int32_t) count;
 }
 
-int32_t nmbs_z_transport_serial_read(uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
+int32_t nmbs_z_transport_serial_read(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
     if (!arg || !buf) {
         return -EINVAL;
     }
@@ -609,7 +599,7 @@ int32_t nmbs_z_transport_serial_read(uint8_t *buf, uint16_t count, int32_t byte_
         return 0;
     }
 
-    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
+    nmbs_z_serial_transport_t* transport = (nmbs_z_serial_transport_t*) arg;
     uint16_t bytes_read = 0;
 
     while (bytes_read < count) {
@@ -628,7 +618,7 @@ int32_t nmbs_z_transport_serial_read(uint8_t *buf, uint16_t count, int32_t byte_
         k_spin_unlock(&transport->rb_lock, key);
 
         if (got > 0) {
-            bytes_read += (uint16_t)got;
+            bytes_read += (uint16_t) got;
             continue;
         }
 
@@ -643,18 +633,17 @@ int32_t nmbs_z_transport_serial_read(uint8_t *buf, uint16_t count, int32_t byte_
         }
     }
 
-    return (int32_t)bytes_read;
+    return (int32_t) bytes_read;
 }
 
-void nmbs_z_transport_serial_flush(nmbs_t *nmbs, void *arg)
-{
+void nmbs_z_transport_serial_flush(nmbs_t* nmbs, void* arg) {
     ARG_UNUSED(nmbs);
 
     if (!arg) {
         return;
     }
 
-    nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
+    nmbs_z_serial_transport_t* transport = (nmbs_z_serial_transport_t*) arg;
     k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
 
     ring_buf_reset(&transport->rx_rb);
@@ -678,8 +667,7 @@ void nmbs_z_transport_serial_flush(nmbs_t *nmbs, void *arg)
     }
 }
 
-int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const uint8_t *data, uint32_t length)
-{
+int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t* transport, const uint8_t* data, uint32_t length) {
     if (!transport || !data || length == 0) {
         return 0;
     }
@@ -693,7 +681,7 @@ int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const u
     k_spinlock_key_t key = k_spin_lock(&transport->rb_lock);
 
     if (track_gap) {
-        elapsed_us = k_cyc_to_us_floor32((uint32_t)(now - transport->last_rx_cycles));
+        elapsed_us = k_cyc_to_us_floor32((uint32_t) (now - transport->last_rx_cycles));
 
         if (elapsed_us > transport->t1_5_us && ring_buf_size_get(&transport->rx_rb) > 0) {
             /* Modbus over serial line: any gap longer than 1.5 characters
@@ -727,5 +715,5 @@ int nmbs_z_serial_transport_rx_put(nmbs_z_serial_transport_t *transport, const u
         transport->cfg.rx_cb(transport, data, put, transport->cfg.rx_cb_user_data);
     }
 
-    return (int)put;
+    return (int) put;
 }

@@ -23,7 +23,7 @@ static struct {
     uint32_t configure_calls;
     bool rx_enabled;
     uart_irq_callback_user_data_t irq_cb;
-    void *irq_cb_user_data;
+    void* irq_cb_user_data;
 } mock_re_tracker;
 
 static void reset_mock_re_tracker(void) {
@@ -127,18 +127,18 @@ static int mock_re_uart_configure(const struct device* dev, const struct uart_co
 }
 
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN)
-static void mock_re_uart_irq_callback_set(const struct device *dev, uart_irq_callback_user_data_t cb, void *user_data) {
+static void mock_re_uart_irq_callback_set(const struct device* dev, uart_irq_callback_user_data_t cb, void* user_data) {
     ARG_UNUSED(dev);
     mock_re_tracker.irq_cb = cb;
     mock_re_tracker.irq_cb_user_data = user_data;
 }
 
-static void mock_re_uart_irq_rx_enable(const struct device *dev) {
+static void mock_re_uart_irq_rx_enable(const struct device* dev) {
     ARG_UNUSED(dev);
     mock_re_tracker.rx_enabled = true;
 }
 
-static void mock_re_uart_irq_rx_disable(const struct device *dev) {
+static void mock_re_uart_irq_rx_disable(const struct device* dev) {
     ARG_UNUSED(dev);
     mock_re_tracker.rx_enabled = false;
 }
@@ -367,13 +367,13 @@ ZTEST(nanomodbus_serial, test_serial_transport_reconfigure) {
 
     nmbs_z_serial_transport_t transport;
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = DEVICE_GET(mock_re_uart_dev),
-        .baud_rate = 9600,
-        .parity = UART_CFG_PARITY_NONE,
-        .stop_bits = UART_CFG_STOP_BITS_1,
-        .data_bits = UART_CFG_DATA_BITS_8,
-        .de_mode = NMBS_Z_SERIAL_DE_NONE,
-        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+            .uart_dev = DEVICE_GET(mock_re_uart_dev),
+            .baud_rate = 9600,
+            .parity = UART_CFG_PARITY_NONE,
+            .stop_bits = UART_CFG_STOP_BITS_1,
+            .data_bits = UART_CFG_DATA_BITS_8,
+            .de_mode = NMBS_Z_SERIAL_DE_NONE,
+            .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
     };
     nmbs_platform_conf p_conf;
 
@@ -392,10 +392,10 @@ ZTEST(nanomodbus_serial, test_serial_transport_reconfigure) {
     /* Parameter validation */
     zassert_equal(nmbs_z_serial_transport_reconfigure(NULL, NULL), -EINVAL, "NULL transport");
     struct uart_config invalid_cfg = {
-        .baudrate = 0,
-        .parity = UART_CFG_PARITY_NONE,
-        .stop_bits = UART_CFG_STOP_BITS_1,
-        .data_bits = UART_CFG_DATA_BITS_8,
+            .baudrate = 0,
+            .parity = UART_CFG_PARITY_NONE,
+            .stop_bits = UART_CFG_STOP_BITS_1,
+            .data_bits = UART_CFG_DATA_BITS_8,
     };
     zassert_equal(nmbs_z_serial_transport_reconfigure(&transport, &invalid_cfg), -EINVAL, "Zero baudrate must fail");
 
@@ -406,10 +406,10 @@ ZTEST(nanomodbus_serial, test_serial_transport_reconfigure) {
 
     /* Reconfigure to 19200 bps, Even parity, 2 stop bits, 8 data bits */
     struct uart_config new_cfg_19200 = {
-        .baudrate = 19200,
-        .parity = UART_CFG_PARITY_EVEN,
-        .stop_bits = UART_CFG_STOP_BITS_2,
-        .data_bits = UART_CFG_DATA_BITS_8,
+            .baudrate = 19200,
+            .parity = UART_CFG_PARITY_EVEN,
+            .stop_bits = UART_CFG_STOP_BITS_2,
+            .data_bits = UART_CFG_DATA_BITS_8,
     };
     ret = nmbs_z_serial_transport_reconfigure(&transport, &new_cfg_19200);
     zassert_equal(ret, 0, "Reconfigure to 19200 must succeed");
@@ -435,10 +435,10 @@ ZTEST(nanomodbus_serial, test_serial_transport_reconfigure) {
 
     /* Reconfigure to 115200 bps (> 19200 bps fixed timings) */
     struct uart_config new_cfg_115200 = {
-        .baudrate = 115200,
-        .parity = UART_CFG_PARITY_NONE,
-        .stop_bits = UART_CFG_STOP_BITS_1,
-        .data_bits = UART_CFG_DATA_BITS_8,
+            .baudrate = 115200,
+            .parity = UART_CFG_PARITY_NONE,
+            .stop_bits = UART_CFG_STOP_BITS_1,
+            .data_bits = UART_CFG_DATA_BITS_8,
     };
     ret = nmbs_z_serial_transport_reconfigure(&transport, &new_cfg_115200);
     zassert_equal(ret, 0, "Reconfigure to 115200 must succeed");
@@ -452,13 +452,13 @@ ZTEST(nanomodbus_serial, test_serial_transport_reconfigure) {
     reset_mock_re_tracker();
     nmbs_z_serial_transport_t irq_transport;
     nmbs_z_serial_transport_config_t irq_cfg = {
-        .uart_dev = DEVICE_GET(mock_re_uart_dev),
-        .baud_rate = 9600,
-        .parity = UART_CFG_PARITY_NONE,
-        .stop_bits = UART_CFG_STOP_BITS_1,
-        .data_bits = UART_CFG_DATA_BITS_8,
-        .de_mode = NMBS_Z_SERIAL_DE_NONE,
-        .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
+            .uart_dev = DEVICE_GET(mock_re_uart_dev),
+            .baud_rate = 9600,
+            .parity = UART_CFG_PARITY_NONE,
+            .stop_bits = UART_CFG_STOP_BITS_1,
+            .data_bits = UART_CFG_DATA_BITS_8,
+            .de_mode = NMBS_Z_SERIAL_DE_NONE,
+            .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
     };
 
     ret = nmbs_z_serial_transport_init(&irq_transport, &irq_cfg, &p_conf);
@@ -468,10 +468,10 @@ ZTEST(nanomodbus_serial, test_serial_transport_reconfigure) {
 
     /* Reconfigure while RX is active */
     struct uart_config irq_new_cfg = {
-        .baudrate = 57600,
-        .parity = UART_CFG_PARITY_ODD,
-        .stop_bits = UART_CFG_STOP_BITS_1,
-        .data_bits = UART_CFG_DATA_BITS_8,
+            .baudrate = 57600,
+            .parity = UART_CFG_PARITY_ODD,
+            .stop_bits = UART_CFG_STOP_BITS_1,
+            .data_bits = UART_CFG_DATA_BITS_8,
     };
     ret = nmbs_z_serial_transport_reconfigure(&irq_transport, &irq_new_cfg);
     zassert_equal(ret, 0, "Reconfigure active IRQ transport must succeed");

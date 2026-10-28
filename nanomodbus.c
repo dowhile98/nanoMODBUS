@@ -770,7 +770,7 @@ static nmbs_error recv_read_file_record_res(nmbs_t* nmbs, uint16_t* registers, u
 
 
 static nmbs_error recv_write_file_record_res(nmbs_t* nmbs, uint16_t file_number, uint16_t record_number,
-                                      const uint16_t* registers, uint16_t count) {
+                                             const uint16_t* registers, uint16_t count) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
         return err;
@@ -822,8 +822,8 @@ static nmbs_error recv_write_file_record_res(nmbs_t* nmbs, uint16_t file_number,
 }
 
 static nmbs_error recv_read_device_identification_res(nmbs_t* nmbs, uint8_t buffers_count, char** buffers_out,
-                                               uint8_t buffers_length, const uint8_t* order, uint8_t* ids_out,
-                                               uint8_t* next_object_id_out, uint8_t* objects_count_out) {
+                                                      uint8_t buffers_length, const uint8_t* order, uint8_t* ids_out,
+                                                      uint8_t* next_object_id_out, uint8_t* objects_count_out) {
     nmbs_error err = recv_res_header(nmbs);
     if (err != NMBS_ERROR_NONE)
         return err;

@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/ztest.h>
+#include <string.h>
 #include <zephyr/kernel.h>
-#include <zephyr/net/socket.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
-#include <string.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/ztest.h>
 
 #define MULTI_INST_REGS_COUNT 16
 #define NUM_OPS_PER_THREAD 25
@@ -24,17 +24,15 @@ typedef struct {
     uint32_t ops_count;
 } mock_rtu_bus_t;
 
-static void mock_bus_append_crc(uint8_t *buf, uint16_t len)
-{
+static void mock_bus_append_crc(uint8_t* buf, uint16_t len) {
     uint16_t crc = nmbs_crc_calc(buf, len, NULL);
-    buf[len] = (uint8_t)((crc >> 8) & 0xFF);
-    buf[len + 1] = (uint8_t)(crc & 0xFF);
+    buf[len] = (uint8_t) ((crc >> 8) & 0xFF);
+    buf[len + 1] = (uint8_t) (crc & 0xFF);
 }
 
-static int32_t mock_bus_read(uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
+static int32_t mock_bus_read(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
     ARG_UNUSED(byte_timeout_ms);
-    mock_rtu_bus_t *bus = (mock_rtu_bus_t *)arg;
+    mock_rtu_bus_t* bus = (mock_rtu_bus_t*) arg;
 
     k_mutex_lock(&bus->lock, K_FOREVER);
     if (bus->rx_pos + count > bus->rx_len) {
@@ -48,10 +46,9 @@ static int32_t mock_bus_read(uint8_t *buf, uint16_t count, int32_t byte_timeout_
     return count;
 }
 
-static int32_t mock_bus_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
+static int32_t mock_bus_write(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
     ARG_UNUSED(byte_timeout_ms);
-    mock_rtu_bus_t *bus = (mock_rtu_bus_t *)arg;
+    mock_rtu_bus_t* bus = (mock_rtu_bus_t*) arg;
 
     if (count < 4) {
         return count;
@@ -64,9 +61,9 @@ static int32_t mock_bus_write(const uint8_t *buf, uint16_t count, int32_t byte_t
     bus->rx_len = 0;
 
     if (fc == 0x03) { /* Read Holding Registers */
-        uint16_t addr = ((uint16_t)buf[2] << 8) | buf[3];
-        uint16_t qty = ((uint16_t)buf[4] << 8) | buf[5];
-        uint8_t bytes = (uint8_t)(qty * 2);
+        uint16_t addr = ((uint16_t) buf[2] << 8) | buf[3];
+        uint16_t qty = ((uint16_t) buf[4] << 8) | buf[5];
+        uint8_t bytes = (uint8_t) (qty * 2);
 
         bus->rx_buf[0] = unit_id;
         bus->rx_buf[1] = 0x03;
@@ -76,15 +73,16 @@ static int32_t mock_bus_write(const uint8_t *buf, uint16_t count, int32_t byte_t
             if (addr + i < MULTI_INST_REGS_COUNT) {
                 reg_val = bus->holding_regs[addr + i];
             }
-            bus->rx_buf[3 + 2 * i] = (uint8_t)((reg_val >> 8) & 0xFF);
-            bus->rx_buf[4 + 2 * i] = (uint8_t)(reg_val & 0xFF);
+            bus->rx_buf[3 + 2 * i] = (uint8_t) ((reg_val >> 8) & 0xFF);
+            bus->rx_buf[4 + 2 * i] = (uint8_t) (reg_val & 0xFF);
         }
         mock_bus_append_crc(bus->rx_buf, 3 + bytes);
         bus->rx_len = 3 + bytes + 2;
         bus->ops_count++;
-    } else if (fc == 0x06) { /* Write Single Register */
-        uint16_t addr = ((uint16_t)buf[2] << 8) | buf[3];
-        uint16_t val = ((uint16_t)buf[4] << 8) | buf[5];
+    }
+    else if (fc == 0x06) { /* Write Single Register */
+        uint16_t addr = ((uint16_t) buf[2] << 8) | buf[3];
+        uint16_t val = ((uint16_t) buf[4] << 8) | buf[5];
         if (addr < MULTI_INST_REGS_COUNT) {
             bus->holding_regs[addr] = val;
         }
@@ -103,10 +101,8 @@ static int32_t mock_bus_write(const uint8_t *buf, uint16_t count, int32_t byte_t
 static uint16_t tcp_server_holding_regs[MULTI_INST_REGS_COUNT];
 static uint32_t tcp_server_ops_count;
 
-static nmbs_error server_tcp_read_holding_registers(uint16_t address, uint16_t quantity,
-                                                   uint16_t *registers_out, uint8_t unit_id,
-                                                   void *arg)
-{
+static nmbs_error server_tcp_read_holding_registers(uint16_t address, uint16_t quantity, uint16_t* registers_out,
+                                                    uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -121,9 +117,7 @@ static nmbs_error server_tcp_read_holding_registers(uint16_t address, uint16_t q
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error server_tcp_write_single_register(uint16_t address, uint16_t value,
-                                                  uint8_t unit_id, void *arg)
-{
+static nmbs_error server_tcp_write_single_register(uint16_t address, uint16_t value, uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -160,8 +154,7 @@ static struct k_thread thread_a;
 static struct k_thread thread_b;
 static struct k_thread thread_c;
 
-static void thread_a_fn(void *arg1, void *arg2, void *arg3)
-{
+static void thread_a_fn(void* arg1, void* arg2, void* arg3) {
     ARG_UNUSED(arg1);
     ARG_UNUSED(arg2);
     ARG_UNUSED(arg3);
@@ -176,14 +169,14 @@ static void thread_a_fn(void *arg1, void *arg2, void *arg3)
             continue;
         }
 
-        ret = nmbs_z_client_write_single_register(&client1, 0, (uint16_t)(1000 + i), K_MSEC(500));
+        ret = nmbs_z_client_write_single_register(&client1, 0, (uint16_t) (1000 + i), K_MSEC(500));
         if (ret != 0) {
             thread_a_errors++;
             continue;
         }
 
         ret = nmbs_z_client_read_holding_registers(&client1, 0, 1, regs, K_MSEC(500));
-        if (ret != 0 || regs[0] != (uint16_t)(1000 + i)) {
+        if (ret != 0 || regs[0] != (uint16_t) (1000 + i)) {
             thread_a_errors++;
             continue;
         }
@@ -193,8 +186,7 @@ static void thread_a_fn(void *arg1, void *arg2, void *arg3)
     }
 }
 
-static void thread_b_fn(void *arg1, void *arg2, void *arg3)
-{
+static void thread_b_fn(void* arg1, void* arg2, void* arg3) {
     ARG_UNUSED(arg1);
     ARG_UNUSED(arg2);
     ARG_UNUSED(arg3);
@@ -209,14 +201,14 @@ static void thread_b_fn(void *arg1, void *arg2, void *arg3)
             continue;
         }
 
-        ret = nmbs_z_client_write_single_register(&client2, 0, (uint16_t)(2000 + i), K_MSEC(500));
+        ret = nmbs_z_client_write_single_register(&client2, 0, (uint16_t) (2000 + i), K_MSEC(500));
         if (ret != 0) {
             thread_b_errors++;
             continue;
         }
 
         ret = nmbs_z_client_read_holding_registers(&client2, 0, 1, regs, K_MSEC(500));
-        if (ret != 0 || regs[0] != (uint16_t)(2000 + i)) {
+        if (ret != 0 || regs[0] != (uint16_t) (2000 + i)) {
             thread_b_errors++;
             continue;
         }
@@ -226,8 +218,7 @@ static void thread_b_fn(void *arg1, void *arg2, void *arg3)
     }
 }
 
-static void thread_c_fn(void *arg1, void *arg2, void *arg3)
-{
+static void thread_c_fn(void* arg1, void* arg2, void* arg3) {
     ARG_UNUSED(arg1);
     ARG_UNUSED(arg2);
     ARG_UNUSED(arg3);
@@ -242,14 +233,14 @@ static void thread_c_fn(void *arg1, void *arg2, void *arg3)
             continue;
         }
 
-        ret = nmbs_z_client_write_single_register(&client3, 0, (uint16_t)(5000 + i), K_MSEC(1000));
+        ret = nmbs_z_client_write_single_register(&client3, 0, (uint16_t) (5000 + i), K_MSEC(1000));
         if (ret != 0) {
             thread_c_errors++;
             continue;
         }
 
         ret = nmbs_z_client_read_holding_registers(&client3, 0, 1, regs, K_MSEC(1000));
-        if (ret != 0 || regs[0] != (uint16_t)(5000 + i)) {
+        if (ret != 0 || regs[0] != (uint16_t) (5000 + i)) {
             thread_c_errors++;
             continue;
         }
@@ -260,13 +251,12 @@ static void thread_c_fn(void *arg1, void *arg2, void *arg3)
 }
 
 /* Concurrency & Multi-Instance Unit Test (Review Focus 5) */
-ZTEST(nanomodbus_multi_instance, test_concurrent_multi_instances)
-{
+ZTEST(nanomodbus_multi_instance, test_concurrent_multi_instances) {
     /* 1. Initialize Bus 1 and Client 1 */
     memset(&bus1, 0, sizeof(bus1));
     k_mutex_init(&bus1.lock);
     for (int i = 0; i < MULTI_INST_REGS_COUNT; i++) {
-        bus1.holding_regs[i] = (uint16_t)(1000 + i);
+        bus1.holding_regs[i] = (uint16_t) (1000 + i);
     }
 
     nmbs_platform_conf plat1;
@@ -285,7 +275,7 @@ ZTEST(nanomodbus_multi_instance, test_concurrent_multi_instances)
     memset(&bus2, 0, sizeof(bus2));
     k_mutex_init(&bus2.lock);
     for (int i = 0; i < MULTI_INST_REGS_COUNT; i++) {
-        bus2.holding_regs[i] = (uint16_t)(2000 + i);
+        bus2.holding_regs[i] = (uint16_t) (2000 + i);
     }
 
     nmbs_platform_conf plat2;
@@ -303,7 +293,7 @@ ZTEST(nanomodbus_multi_instance, test_concurrent_multi_instances)
     /* 3. Initialize TCP Server on loopback port 5025 */
     memset(tcp_server_holding_regs, 0, sizeof(tcp_server_holding_regs));
     for (int i = 0; i < MULTI_INST_REGS_COUNT; i++) {
-        tcp_server_holding_regs[i] = (uint16_t)(5000 + i);
+        tcp_server_holding_regs[i] = (uint16_t) (5000 + i);
     }
     tcp_server_ops_count = 0;
 
@@ -332,15 +322,9 @@ ZTEST(nanomodbus_multi_instance, test_concurrent_multi_instances)
 
     k_sem_init(&start_sem, 0, 3);
 
-    k_thread_create(&thread_a, stack_a, K_THREAD_STACK_SIZEOF(stack_a),
-                    thread_a_fn, NULL, NULL, NULL,
-                    5, 0, K_NO_WAIT);
-    k_thread_create(&thread_b, stack_b, K_THREAD_STACK_SIZEOF(stack_b),
-                    thread_b_fn, NULL, NULL, NULL,
-                    5, 0, K_NO_WAIT);
-    k_thread_create(&thread_c, stack_c, K_THREAD_STACK_SIZEOF(stack_c),
-                    thread_c_fn, NULL, NULL, NULL,
-                    5, 0, K_NO_WAIT);
+    k_thread_create(&thread_a, stack_a, K_THREAD_STACK_SIZEOF(stack_a), thread_a_fn, NULL, NULL, NULL, 5, 0, K_NO_WAIT);
+    k_thread_create(&thread_b, stack_b, K_THREAD_STACK_SIZEOF(stack_b), thread_b_fn, NULL, NULL, NULL, 5, 0, K_NO_WAIT);
+    k_thread_create(&thread_c, stack_c, K_THREAD_STACK_SIZEOF(stack_c), thread_c_fn, NULL, NULL, NULL, 5, 0, K_NO_WAIT);
 
     /* Release all threads to run concurrently */
     k_sem_give(&start_sem);
@@ -354,40 +338,40 @@ ZTEST(nanomodbus_multi_instance, test_concurrent_multi_instances)
 
     /* 6. Assertions: 100% success across all 3 instances */
     zassert_equal(thread_a_errors, 0, "Thread A had %u errors", thread_a_errors);
-    zassert_equal(thread_a_success, NUM_OPS_PER_THREAD, "Thread A completed %u/%u ops",
-                  thread_a_success, NUM_OPS_PER_THREAD);
+    zassert_equal(thread_a_success, NUM_OPS_PER_THREAD, "Thread A completed %u/%u ops", thread_a_success,
+                  NUM_OPS_PER_THREAD);
 
     zassert_equal(thread_b_errors, 0, "Thread B had %u errors", thread_b_errors);
-    zassert_equal(thread_b_success, NUM_OPS_PER_THREAD, "Thread B completed %u/%u ops",
-                  thread_b_success, NUM_OPS_PER_THREAD);
+    zassert_equal(thread_b_success, NUM_OPS_PER_THREAD, "Thread B completed %u/%u ops", thread_b_success,
+                  NUM_OPS_PER_THREAD);
 
     zassert_equal(thread_c_errors, 0, "Thread C had %u errors", thread_c_errors);
-    zassert_equal(thread_c_success, NUM_OPS_PER_THREAD, "Thread C completed %u/%u ops",
-                  thread_c_success, NUM_OPS_PER_THREAD);
+    zassert_equal(thread_c_success, NUM_OPS_PER_THREAD, "Thread C completed %u/%u ops", thread_c_success,
+                  NUM_OPS_PER_THREAD);
 
     /* 7. Zero memory corruption and zero cross-contamination */
     /* Bus 1 holding registers: reg 0 written to 1000 + NUM_OPS - 1, regs 1..15 untouched */
-    zassert_equal(bus1.holding_regs[0], (uint16_t)(1000 + NUM_OPS_PER_THREAD - 1),
-                  "Bus 1 corrupted: reg 0 is %u", bus1.holding_regs[0]);
+    zassert_equal(bus1.holding_regs[0], (uint16_t) (1000 + NUM_OPS_PER_THREAD - 1), "Bus 1 corrupted: reg 0 is %u",
+                  bus1.holding_regs[0]);
     for (int i = 1; i < MULTI_INST_REGS_COUNT; i++) {
-        zassert_equal(bus1.holding_regs[i], (uint16_t)(1000 + i),
-                      "Bus 1 corrupted: reg %d is %u", i, bus1.holding_regs[i]);
+        zassert_equal(bus1.holding_regs[i], (uint16_t) (1000 + i), "Bus 1 corrupted: reg %d is %u", i,
+                      bus1.holding_regs[i]);
     }
 
     /* Bus 2 holding registers: reg 0 written to 2000 + NUM_OPS - 1, regs 1..15 untouched */
-    zassert_equal(bus2.holding_regs[0], (uint16_t)(2000 + NUM_OPS_PER_THREAD - 1),
-                  "Bus 2 corrupted: reg 0 is %u", bus2.holding_regs[0]);
+    zassert_equal(bus2.holding_regs[0], (uint16_t) (2000 + NUM_OPS_PER_THREAD - 1), "Bus 2 corrupted: reg 0 is %u",
+                  bus2.holding_regs[0]);
     for (int i = 1; i < MULTI_INST_REGS_COUNT; i++) {
-        zassert_equal(bus2.holding_regs[i], (uint16_t)(2000 + i),
-                      "Bus 2 corrupted: reg %d is %u", i, bus2.holding_regs[i]);
+        zassert_equal(bus2.holding_regs[i], (uint16_t) (2000 + i), "Bus 2 corrupted: reg %d is %u", i,
+                      bus2.holding_regs[i]);
     }
 
     /* TCP Server registers: reg 0 written to 5000 + NUM_OPS - 1, regs 1..15 untouched */
-    zassert_equal(tcp_server_holding_regs[0], (uint16_t)(5000 + NUM_OPS_PER_THREAD - 1),
+    zassert_equal(tcp_server_holding_regs[0], (uint16_t) (5000 + NUM_OPS_PER_THREAD - 1),
                   "TCP Server corrupted: reg 0 is %u", tcp_server_holding_regs[0]);
     for (int i = 1; i < MULTI_INST_REGS_COUNT; i++) {
-        zassert_equal(tcp_server_holding_regs[i], (uint16_t)(5000 + i),
-                      "TCP Server corrupted: reg %d is %u", i, tcp_server_holding_regs[i]);
+        zassert_equal(tcp_server_holding_regs[i], (uint16_t) (5000 + i), "TCP Server corrupted: reg %d is %u", i,
+                      tcp_server_holding_regs[i]);
     }
 
     /* Verify independent mutex states */

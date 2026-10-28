@@ -3,38 +3,35 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/ztest.h>
 #include <errno.h>
 #include <string.h>
-#include <zephyr/kernel.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/kernel.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
+#include <zephyr/ztest.h>
 
 /* Mock UART transmitter capturing responses */
 static uint8_t mock_server_tx_buf[256];
 static uint16_t mock_server_tx_len = 0;
 
-static void mock_server_uart_poll_out(const struct device *dev, unsigned char out_char)
-{
+static void mock_server_uart_poll_out(const struct device* dev, unsigned char out_char) {
     ARG_UNUSED(dev);
     if (mock_server_tx_len < sizeof(mock_server_tx_buf)) {
-        mock_server_tx_buf[mock_server_tx_len++] = (uint8_t)out_char;
+        mock_server_tx_buf[mock_server_tx_len++] = (uint8_t) out_char;
     }
 }
 
 static DEVICE_API(uart, mock_server_uart_api) = {
-    .poll_out = mock_server_uart_poll_out,
+        .poll_out = mock_server_uart_poll_out,
 };
 
-static int mock_server_dev_init(const struct device *dev)
-{
+static int mock_server_dev_init(const struct device* dev) {
     ARG_UNUSED(dev);
     return 0;
 }
 
-DEVICE_DEFINE(mock_server_uart_dev, "mock_server_uart", mock_server_dev_init, NULL,
-              NULL, NULL,
-              POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &mock_server_uart_api);
+DEVICE_DEFINE(mock_server_uart_dev, "mock_server_uart", mock_server_dev_init, NULL, NULL, NULL, POST_KERNEL,
+              CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &mock_server_uart_api);
 
 /* Callback execution tracker */
 static struct {
@@ -51,17 +48,14 @@ static struct {
     uint32_t call_count;
 } server_cb_tracker;
 
-static void reset_server_tracker(void)
-{
+static void reset_server_tracker(void) {
     memset(&server_cb_tracker, 0, sizeof(server_cb_tracker));
     mock_server_tx_len = 0;
     memset(mock_server_tx_buf, 0, sizeof(mock_server_tx_buf));
 }
 
-static nmbs_error mock_read_holding_registers(uint16_t address, uint16_t quantity,
-                                             uint16_t *registers_out, uint8_t unit_id,
-                                             void *arg)
-{
+static nmbs_error mock_read_holding_registers(uint16_t address, uint16_t quantity, uint16_t* registers_out,
+                                              uint8_t unit_id, void* arg) {
     ARG_UNUSED(arg);
     server_cb_tracker.read_holding_called = true;
     server_cb_tracker.read_address = address;
@@ -75,9 +69,7 @@ static nmbs_error mock_read_holding_registers(uint16_t address, uint16_t quantit
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error mock_write_single_register(uint16_t address, uint16_t value,
-                                            uint8_t unit_id, void *arg)
-{
+static nmbs_error mock_write_single_register(uint16_t address, uint16_t value, uint8_t unit_id, void* arg) {
     ARG_UNUSED(arg);
     server_cb_tracker.write_single_called = true;
     server_cb_tracker.write_address = address;
@@ -87,10 +79,8 @@ static nmbs_error mock_write_single_register(uint16_t address, uint16_t value,
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error mock_write_multiple_registers(uint16_t address, uint16_t quantity,
-                                               const uint16_t *registers, uint8_t unit_id,
-                                               void *arg)
-{
+static nmbs_error mock_write_multiple_registers(uint16_t address, uint16_t quantity, const uint16_t* registers,
+                                                uint8_t unit_id, void* arg) {
     ARG_UNUSED(arg);
     server_cb_tracker.write_multiple_called = true;
     server_cb_tracker.write_address = address;
@@ -104,26 +94,24 @@ static nmbs_error mock_write_multiple_registers(uint16_t address, uint16_t quant
     return NMBS_ERROR_NONE;
 }
 
-static void helper_append_crc(uint8_t *buf, uint16_t len)
-{
+static void helper_append_crc(uint8_t* buf, uint16_t len) {
     uint16_t crc = nmbs_crc_calc(buf, len, NULL);
-    buf[len] = (uint8_t)((crc >> 8) & 0xFF);
-    buf[len + 1] = (uint8_t)(crc & 0xFF);
+    buf[len] = (uint8_t) ((crc >> 8) & 0xFF);
+    buf[len + 1] = (uint8_t) (crc & 0xFF);
 }
 
 /* ========================================================================= */
 /* Test 1: Full RTU request reception, callbacks and response transmission   */
 /* ========================================================================= */
-ZTEST(nanomodbus_server_rtu, test_full_rtu_requests_reception_and_response)
-{
+ZTEST(nanomodbus_server_rtu, test_full_rtu_requests_reception_and_response) {
     reset_server_tracker();
 
     static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = DEVICE_GET(mock_server_uart_dev),
-        .baud_rate = 115200,
-        .de_pre_delay_us = 0,
-        .de_post_delay_us = 0,
+            .uart_dev = DEVICE_GET(mock_server_uart_dev),
+            .baud_rate = 115200,
+            .de_pre_delay_us = 0,
+            .de_post_delay_us = 0,
     };
 
     nmbs_callbacks cbs = {0};
@@ -180,11 +168,7 @@ ZTEST(nanomodbus_server_rtu, test_full_rtu_requests_reception_and_response)
 
     /* --- Subtest 1C: FC 16 Write Multiple Registers (Addr 30, Qty 2, Vals [0x1111, 0x2222]) --- */
     reset_server_tracker();
-    uint8_t req_fc16[13] = {
-        1, 16, 0x00, 0x1E, 0x00, 0x02, 4,
-        0x11, 0x11, 0x22, 0x22,
-        0, 0
-    };
+    uint8_t req_fc16[13] = {1, 16, 0x00, 0x1E, 0x00, 0x02, 4, 0x11, 0x11, 0x22, 0x22, 0, 0};
     helper_append_crc(req_fc16, 11);
 
     for (int i = 0; i < sizeof(req_fc16); i++) {
@@ -204,16 +188,15 @@ ZTEST(nanomodbus_server_rtu, test_full_rtu_requests_reception_and_response)
 /* ========================================================================= */
 /* Test 2 (Review Focus 3): Fragmented character delivery silence reset      */
 /* ========================================================================= */
-ZTEST(nanomodbus_server_rtu, test_fragmented_character_silence_reset)
-{
+ZTEST(nanomodbus_server_rtu, test_fragmented_character_silence_reset) {
     reset_server_tracker();
 
     static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = DEVICE_GET(mock_server_uart_dev),
-        .baud_rate = 115200, /* t3.5 = 1750 us */
-        .de_pre_delay_us = 0,
-        .de_post_delay_us = 0,
+            .uart_dev = DEVICE_GET(mock_server_uart_dev),
+            .baud_rate = 115200, /* t3.5 = 1750 us */
+            .de_pre_delay_us = 0,
+            .de_post_delay_us = 0,
     };
 
     nmbs_callbacks cbs = {0};
@@ -236,8 +219,7 @@ ZTEST(nanomodbus_server_rtu, test_fragmented_character_silence_reset)
 
         zassert_equal(server_cb_tracker.call_count, 0,
                       "Workqueue must NOT be triggered mid-frame while gap < t3.5 (byte %d)", i);
-        zassert_equal(mock_server_tx_len, 0,
-                      "No response must be generated while frame is incomplete");
+        zassert_equal(mock_server_tx_len, 0, "No response must be generated while frame is incomplete");
     }
 
     /* Deliver the 8th (final) byte */
@@ -261,16 +243,15 @@ ZTEST(nanomodbus_server_rtu, test_fragmented_character_silence_reset)
 /* ========================================================================= */
 /* Test 3: Stop server cancellation and start resumption                     */
 /* ========================================================================= */
-ZTEST(nanomodbus_server_rtu, test_server_stop_and_start)
-{
+ZTEST(nanomodbus_server_rtu, test_server_stop_and_start) {
     reset_server_tracker();
 
     static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = DEVICE_GET(mock_server_uart_dev),
-        .baud_rate = 115200,
-        .de_pre_delay_us = 0,
-        .de_post_delay_us = 0,
+            .uart_dev = DEVICE_GET(mock_server_uart_dev),
+            .baud_rate = 115200,
+            .de_pre_delay_us = 0,
+            .de_post_delay_us = 0,
     };
 
     nmbs_callbacks cbs = {0};
@@ -298,8 +279,7 @@ ZTEST(nanomodbus_server_rtu, test_server_stop_and_start)
 
     k_sleep(K_MSEC(5));
 
-    zassert_equal(server_cb_tracker.call_count, 0,
-                  "Stopped server must not trigger callbacks or process frames");
+    zassert_equal(server_cb_tracker.call_count, 0, "Stopped server must not trigger callbacks or process frames");
     zassert_equal(mock_server_tx_len, 0, "No TX while stopped");
 
     /* Restart the server */
@@ -314,17 +294,15 @@ ZTEST(nanomodbus_server_rtu, test_server_stop_and_start)
 
     k_sleep(K_MSEC(5));
 
-    zassert_equal(server_cb_tracker.call_count, 1,
-                  "Started server must resume frame processing");
+    zassert_equal(server_cb_tracker.call_count, 1, "Started server must resume frame processing");
 }
 
 /* Parameter validation tests */
-ZTEST(nanomodbus_server_rtu, test_server_init_parameter_validation)
-{
+ZTEST(nanomodbus_server_rtu, test_server_init_parameter_validation) {
     static nmbs_z_server_rtu_t server;
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = NULL,
-        .baud_rate = 115200,
+            .uart_dev = NULL,
+            .baud_rate = 115200,
     };
     nmbs_callbacks cbs = {0};
 
@@ -345,15 +323,14 @@ ZTEST(nanomodbus_server_rtu, test_server_init_parameter_validation)
     zassert_equal(nmbs_z_server_rtu_start(&server), -EINVAL, "start before init");
 }
 
-ZTEST(nanomodbus_server_rtu, test_server_rtu_diagnostics_stats)
-{
+ZTEST(nanomodbus_server_rtu, test_server_rtu_diagnostics_stats) {
     static nmbs_z_server_rtu_t stats_server;
-    const struct device *uart = DEVICE_GET(mock_server_uart_dev);
+    const struct device* uart = DEVICE_GET(mock_server_uart_dev);
 
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = uart,
-        .baud_rate = 115200,
-        .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
+            .uart_dev = uart,
+            .baud_rate = 115200,
+            .rx_mode = NMBS_Z_SERIAL_RX_EXTERNAL,
     };
 
     nmbs_callbacks cbs = {0};
@@ -437,14 +414,13 @@ ZTEST(nanomodbus_server_rtu, test_server_rtu_diagnostics_stats)
 /* ========================================================================= */
 /* Test 5: RTU Server set_address and get_address                            */
 /* ========================================================================= */
-ZTEST(nanomodbus_server_rtu, test_server_rtu_set_and_get_address)
-{
+ZTEST(nanomodbus_server_rtu, test_server_rtu_set_and_get_address) {
     static nmbs_z_server_rtu_t addr_server;
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = DEVICE_GET(mock_server_uart_dev),
-        .baud_rate = 115200,
-        .de_pre_delay_us = 0,
-        .de_post_delay_us = 0,
+            .uart_dev = DEVICE_GET(mock_server_uart_dev),
+            .baud_rate = 115200,
+            .de_pre_delay_us = 0,
+            .de_post_delay_us = 0,
     };
     nmbs_callbacks cbs = {0};
 
@@ -473,16 +449,15 @@ ZTEST(nanomodbus_server_rtu, test_server_rtu_set_and_get_address)
 /* ========================================================================= */
 /* Test 6: RTU Server reconfiguration and selective address response         */
 /* ========================================================================= */
-ZTEST(nanomodbus_server_rtu, test_server_rtu_reconfigure)
-{
+ZTEST(nanomodbus_server_rtu, test_server_rtu_reconfigure) {
     reset_server_tracker();
 
     static nmbs_z_server_rtu_t reconfig_server;
     nmbs_z_serial_transport_config_t cfg = {
-        .uart_dev = DEVICE_GET(mock_server_uart_dev),
-        .baud_rate = 115200,
-        .de_pre_delay_us = 0,
-        .de_post_delay_us = 0,
+            .uart_dev = DEVICE_GET(mock_server_uart_dev),
+            .baud_rate = 115200,
+            .de_pre_delay_us = 0,
+            .de_post_delay_us = 0,
     };
 
     nmbs_callbacks cbs = {0};
@@ -498,7 +473,7 @@ ZTEST(nanomodbus_server_rtu, test_server_rtu_reconfigure)
     /* Parameter validation */
     zassert_equal(nmbs_z_server_rtu_reconfigure(NULL, NULL, 1), -EINVAL, "NULL server");
     zassert_equal(nmbs_z_server_rtu_reconfigure(&reconfig_server, NULL, 248), -EINVAL, "slave_id > 247");
-    struct uart_config invalid_cfg = { .baudrate = 0 };
+    struct uart_config invalid_cfg = {.baudrate = 0};
     zassert_equal(nmbs_z_server_rtu_reconfigure(&reconfig_server, &invalid_cfg, 1), -EINVAL, "0 baudrate");
 
     /* Initial state: responds to address 1 */
@@ -547,10 +522,10 @@ ZTEST(nanomodbus_server_rtu, test_server_rtu_reconfigure)
 
     /* Reconfigure with slave_id == 0: only changes UART settings */
     struct uart_config new_uart_cfg = {
-        .baudrate = 57600,
-        .parity = UART_CFG_PARITY_EVEN,
-        .stop_bits = UART_CFG_STOP_BITS_2,
-        .data_bits = UART_CFG_DATA_BITS_8,
+            .baudrate = 57600,
+            .parity = UART_CFG_PARITY_EVEN,
+            .stop_bits = UART_CFG_STOP_BITS_2,
+            .data_bits = UART_CFG_DATA_BITS_8,
     };
     ret = nmbs_z_server_rtu_reconfigure(&reconfig_server, &new_uart_cfg, 0);
     zassert_equal(ret, 0, "Reconfigure with slave_id 0 must succeed");

@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
-#include <zephyr/logging/log.h>
 #include <string.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
 
 LOG_MODULE_REGISTER(nmbs_tcp, CONFIG_NANOMODBUS_LOG_LEVEL);
 
@@ -14,8 +14,7 @@ LOG_MODULE_REGISTER(nmbs_tcp, CONFIG_NANOMODBUS_LOG_LEVEL);
  * latency sensitive) and optionally enable keepalive so a vanished peer is
  * detected instead of blocking the client forever.
  */
-static void tcp_apply_socket_options(int sock)
-{
+static void tcp_apply_socket_options(int sock) {
     int opt = 1;
     int ret = zsock_setsockopt(sock, NET_IPPROTO_TCP, ZSOCK_TCP_NODELAY, &opt, sizeof(opt));
 
@@ -42,12 +41,8 @@ static void tcp_apply_socket_options(int sock)
 #endif /* CONFIG_NANOMODBUS_TCP_KEEPALIVE */
 }
 
-int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
-                                 const char *server_ip,
-                                 uint16_t port,
-                                 int32_t timeout_ms,
-                                 nmbs_platform_conf *platform_conf)
-{
+int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t* transport, const char* server_ip, uint16_t port,
+                                 int32_t timeout_ms, nmbs_platform_conf* platform_conf) {
     if (!transport || !server_ip || !platform_conf || port == 0) {
         return -EINVAL;
     }
@@ -56,14 +51,15 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
     transport->sock = -1;
     transport->timeout_ms = timeout_ms;
 
-    struct net_sockaddr_in *addr4 = (struct net_sockaddr_in *)&transport->server_addr;
+    struct net_sockaddr_in* addr4 = (struct net_sockaddr_in*) &transport->server_addr;
     addr4->sin_family = NET_AF_INET;
     addr4->sin_port = net_htons(port);
     int ret = zsock_inet_pton(NET_AF_INET, server_ip, &addr4->sin_addr);
     if (ret == 1) {
         transport->addr_len = sizeof(struct net_sockaddr_in);
-    } else {
-        struct net_sockaddr_in6 *addr6 = (struct net_sockaddr_in6 *)&transport->server_addr;
+    }
+    else {
+        struct net_sockaddr_in6* addr6 = (struct net_sockaddr_in6*) &transport->server_addr;
         addr6->sin6_family = NET_AF_INET6;
         addr6->sin6_port = net_htons(port);
         ret = zsock_inet_pton(NET_AF_INET6, server_ip, &addr6->sin6_addr);
@@ -83,8 +79,8 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
 
     if (timeout_ms > 0) {
         struct timeval tv = {
-            .tv_sec = timeout_ms / 1000,
-            .tv_usec = (timeout_ms % 1000) * 1000,
+                .tv_sec = timeout_ms / 1000,
+                .tv_usec = (timeout_ms % 1000) * 1000,
         };
         zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_RCVTIMEO, &tv, sizeof(tv));
         zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_SNDTIMEO, &tv, sizeof(tv));
@@ -92,7 +88,7 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
 
     tcp_apply_socket_options(sock);
 
-    ret = zsock_connect(sock, (struct net_sockaddr *)&transport->server_addr, transport->addr_len);
+    ret = zsock_connect(sock, (struct net_sockaddr*) &transport->server_addr, transport->addr_len);
     if (ret < 0) {
         int err = -errno;
         LOG_ERR("Socket connect failed: %d", errno);
@@ -117,11 +113,10 @@ int nmbs_z_tcp_transport_connect(nmbs_z_tcp_transport_t *transport,
  * Returns 1 when the socket is ready, 0 on timeout and a negative errno on
  * error.
  */
-static int tcp_wait_for(int sock, short events, int32_t timeout_ms)
-{
+static int tcp_wait_for(int sock, short events, int32_t timeout_ms) {
     struct zsock_pollfd pfd = {
-        .fd = sock,
-        .events = events,
+            .fd = sock,
+            .events = events,
     };
 
     int pret = zsock_poll(&pfd, 1, (timeout_ms < 0) ? -1 : timeout_ms);
@@ -148,8 +143,7 @@ static int tcp_wait_for(int sock, short events, int32_t timeout_ms)
     return 1;
 }
 
-int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
+int32_t nmbs_z_transport_tcp_read(uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
     if (!arg || !buf) {
         return -EINVAL;
     }
@@ -158,7 +152,7 @@ int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_tim
         return 0;
     }
 
-    nmbs_z_tcp_transport_t *transport = (nmbs_z_tcp_transport_t *)arg;
+    nmbs_z_tcp_transport_t* transport = (nmbs_z_tcp_transport_t*) arg;
     if (transport->sock < 0) {
         return -ENOTCONN;
     }
@@ -208,14 +202,13 @@ int32_t nmbs_z_transport_tcp_read(uint8_t *buf, uint16_t count, int32_t byte_tim
             break;
         }
 
-        recvd += (uint16_t)ret;
+        recvd += (uint16_t) ret;
     }
 
-    return (int32_t)recvd;
+    return (int32_t) recvd;
 }
 
-int32_t nmbs_z_transport_tcp_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
+int32_t nmbs_z_transport_tcp_write(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
     if (!arg || !buf) {
         return -EINVAL;
     }
@@ -224,7 +217,7 @@ int32_t nmbs_z_transport_tcp_write(const uint8_t *buf, uint16_t count, int32_t b
         return 0;
     }
 
-    nmbs_z_tcp_transport_t *transport = (nmbs_z_tcp_transport_t *)arg;
+    nmbs_z_tcp_transport_t* transport = (nmbs_z_tcp_transport_t*) arg;
     if (transport->sock < 0) {
         return -ENOTCONN;
     }
@@ -265,21 +258,20 @@ int32_t nmbs_z_transport_tcp_write(const uint8_t *buf, uint16_t count, int32_t b
             return -ECONNRESET;
         }
 
-        sent += (uint16_t)ret;
+        sent += (uint16_t) ret;
     }
 
-    return (int32_t)sent;
+    return (int32_t) sent;
 }
 
-void nmbs_z_transport_tcp_flush(nmbs_t *nmbs, void *arg)
-{
+void nmbs_z_transport_tcp_flush(nmbs_t* nmbs, void* arg) {
     ARG_UNUSED(nmbs);
 
     if (!arg) {
         return;
     }
 
-    nmbs_z_tcp_transport_t *transport = (nmbs_z_tcp_transport_t *)arg;
+    nmbs_z_tcp_transport_t* transport = (nmbs_z_tcp_transport_t*) arg;
     if (transport->sock < 0) {
         return;
     }
@@ -293,8 +285,7 @@ void nmbs_z_transport_tcp_flush(nmbs_t *nmbs, void *arg)
     }
 }
 
-int nmbs_z_tcp_transport_close(nmbs_z_tcp_transport_t *transport)
-{
+int nmbs_z_tcp_transport_close(nmbs_z_tcp_transport_t* transport) {
     if (!transport) {
         return -EINVAL;
     }

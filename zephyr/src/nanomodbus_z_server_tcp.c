@@ -3,21 +3,20 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
-#include <zephyr/logging/log.h>
 #include <string.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
 
 #ifdef CONFIG_NANOMODBUS_SERVER_TCP
 
 LOG_MODULE_REGISTER(nmbs_server_tcp, CONFIG_NANOMODBUS_LOG_LEVEL);
 
-static int32_t server_tcp_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
-{
-    nmbs_z_tcp_transport_t *transport = (nmbs_z_tcp_transport_t *)arg;
+static int32_t server_tcp_write(const uint8_t* buf, uint16_t count, int32_t byte_timeout_ms, void* arg) {
+    nmbs_z_tcp_transport_t* transport = (nmbs_z_tcp_transport_t*) arg;
     int32_t ret = nmbs_z_transport_tcp_write(buf, count, byte_timeout_ms, transport);
 #ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
     if (ret > 0) {
-        nmbs_z_server_tcp_t *server = CONTAINER_OF(transport, nmbs_z_server_tcp_t, client_transport);
+        nmbs_z_server_tcp_t* server = CONTAINER_OF(transport, nmbs_z_server_tcp_t, client_transport);
         server->stats.tx_frames++;
         if (count >= 8 && (buf[7] & 0x80)) {
             server->stats.exceptions++;
@@ -27,12 +26,11 @@ static int32_t server_tcp_write(const uint8_t *buf, uint16_t count, int32_t byte
     return ret;
 }
 
-static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
-{
+static void tcp_server_thread_fn(void* arg1, void* arg2, void* arg3) {
     ARG_UNUSED(arg2);
     ARG_UNUSED(arg3);
 
-    nmbs_z_server_tcp_t *server = (nmbs_z_server_tcp_t *)arg1;
+    nmbs_z_server_tcp_t* server = (nmbs_z_server_tcp_t*) arg1;
 
     server->listen_sock = zsock_socket(NET_AF_INET, NET_SOCK_STREAM, NET_IPPROTO_TCP);
     if (server->listen_sock < 0) {
@@ -50,12 +48,12 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
     }
 
     struct net_sockaddr_in bind_addr = {
-        .sin_family = NET_AF_INET,
-        .sin_port = net_htons(server->port),
-        .sin_addr.s_addr = NET_INADDR_ANY,
+            .sin_family = NET_AF_INET,
+            .sin_port = net_htons(server->port),
+            .sin_addr.s_addr = NET_INADDR_ANY,
     };
 
-    ret = zsock_bind(server->listen_sock, (struct net_sockaddr *)&bind_addr, sizeof(bind_addr));
+    ret = zsock_bind(server->listen_sock, (struct net_sockaddr*) &bind_addr, sizeof(bind_addr));
     if (ret < 0) {
         LOG_ERR("Failed to bind socket on port %d: %d", server->port, errno);
         zsock_close(server->listen_sock);
@@ -83,8 +81,8 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
 
     while (atomic_get(&server->running)) {
         struct zsock_pollfd pfd = {
-            .fd = server->listen_sock,
-            .events = ZSOCK_POLLIN,
+                .fd = server->listen_sock,
+                .events = ZSOCK_POLLIN,
         };
 
         int pret = zsock_poll(&pfd, 1, 200);
@@ -104,9 +102,7 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
         if (pfd.revents & ZSOCK_POLLIN) {
             struct net_sockaddr_storage client_addr;
             net_socklen_t client_addr_len = sizeof(client_addr);
-            int client_sock = zsock_accept(server->listen_sock,
-                                          (struct net_sockaddr *)&client_addr,
-                                          &client_addr_len);
+            int client_sock = zsock_accept(server->listen_sock, (struct net_sockaddr*) &client_addr, &client_addr_len);
             if (client_sock < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
@@ -125,9 +121,11 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
 #ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
                 if (err == NMBS_ERROR_CRC) {
                     server->stats.crc_errors++;
-                } else if (err == NMBS_ERROR_TIMEOUT) {
+                }
+                else if (err == NMBS_ERROR_TIMEOUT) {
                     server->stats.timeouts++;
-                } else if (err == NMBS_ERROR_NONE) {
+                }
+                else if (err == NMBS_ERROR_NONE) {
                     if (server->core.msg.buf_idx > 0) {
                         server->stats.rx_frames++;
                     }
@@ -170,10 +168,7 @@ static void tcp_server_thread_fn(void *arg1, void *arg2, void *arg3)
     k_sem_give(&server->stop_sem);
 }
 
-int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
-                           const nmbs_callbacks *callbacks,
-                           uint16_t port)
-{
+int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t* server, const nmbs_callbacks* callbacks, uint16_t port) {
     if (!server || !callbacks || port == 0) {
         return -EINVAL;
     }
@@ -210,10 +205,7 @@ int nmbs_z_server_tcp_init(nmbs_z_server_tcp_t *server,
     return 0;
 }
 
-int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
-                            const nmbs_callbacks *callbacks,
-                            uint16_t port)
-{
+int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t* server, const nmbs_callbacks* callbacks, uint16_t port) {
     if (!server) {
         return -EINVAL;
     }
@@ -227,7 +219,8 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
         if (ret != 0) {
             return ret;
         }
-    } else if (server->port == 0) {
+    }
+    else if (server->port == 0) {
         return -EINVAL;
     }
 
@@ -239,14 +232,8 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
     k_sem_reset(&server->ready_sem);
     atomic_set(&server->thread_active, 1);
 
-    k_thread_create(&server->thread,
-                    server->thread_stack,
-                    K_KERNEL_STACK_SIZEOF(server->thread_stack),
-                    tcp_server_thread_fn,
-                    server, NULL, NULL,
-                    server->priority,
-                    0,
-                    K_NO_WAIT);
+    k_thread_create(&server->thread, server->thread_stack, K_KERNEL_STACK_SIZEOF(server->thread_stack),
+                    tcp_server_thread_fn, server, NULL, NULL, server->priority, 0, K_NO_WAIT);
 
     k_thread_name_set(&server->thread, "nmbs_server_tcp");
 
@@ -256,8 +243,8 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
         /* The thread always gives stop_sem when it exits, including the
          * bind/listen failure paths.
          */
-        (void)k_sem_take(&server->stop_sem, K_MSEC(2000));
-        (void)k_thread_join(&server->thread, K_MSEC(1000));
+        (void) k_sem_take(&server->stop_sem, K_MSEC(2000));
+        (void) k_thread_join(&server->thread, K_MSEC(1000));
         atomic_set(&server->thread_active, 0);
         return (ret != 0) ? -ETIMEDOUT : -EIO;
     }
@@ -265,8 +252,7 @@ int nmbs_z_server_tcp_start(nmbs_z_server_tcp_t *server,
     return 0;
 }
 
-int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server)
-{
+int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t* server) {
     if (!server) {
         return -EINVAL;
     }
@@ -281,11 +267,11 @@ int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server)
      * owner that closes the descriptors.
      */
     if (server->client_sock >= 0) {
-        (void)zsock_shutdown(server->client_sock, ZSOCK_SHUT_RDWR);
+        (void) zsock_shutdown(server->client_sock, ZSOCK_SHUT_RDWR);
     }
 
     if (server->listen_sock >= 0) {
-        (void)zsock_shutdown(server->listen_sock, ZSOCK_SHUT_RDWR);
+        (void) zsock_shutdown(server->listen_sock, ZSOCK_SHUT_RDWR);
     }
 
     int ret = k_sem_take(&server->stop_sem, K_MSEC(2000));
@@ -295,14 +281,13 @@ int nmbs_z_server_tcp_stop(nmbs_z_server_tcp_t *server)
         k_sem_give(&server->stop_sem);
     }
 
-    (void)k_thread_join(&server->thread, K_MSEC(1000));
+    (void) k_thread_join(&server->thread, K_MSEC(1000));
     atomic_set(&server->thread_active, 0);
 
     return 0;
 }
 
-int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z_stats *stats)
-{
+int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t* server, struct nmbs_z_stats* stats) {
     if (!server || !stats) {
         return -EINVAL;
     }
@@ -314,8 +299,7 @@ int nmbs_z_server_tcp_get_stats(const nmbs_z_server_tcp_t *server, struct nmbs_z
 #endif
 }
 
-int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t *server)
-{
+int nmbs_z_server_tcp_reset_stats(nmbs_z_server_tcp_t* server) {
     if (!server) {
         return -EINVAL;
     }

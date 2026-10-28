@@ -3,16 +3,15 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/nanomodbus/nanomodbus_z.h>
-#include <zephyr/logging/log.h>
 #include <errno.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/nanomodbus/nanomodbus_z.h>
 
 #ifdef CONFIG_NANOMODBUS_CLIENT
 
 LOG_MODULE_REGISTER(nmbs_client, CONFIG_NANOMODBUS_LOG_LEVEL);
 
-static inline int client_lock(nmbs_z_client_t *client, k_timeout_t lock_timeout)
-{
+static inline int client_lock(nmbs_z_client_t* client, k_timeout_t lock_timeout) {
     int ret = k_mutex_lock(&client->lock, lock_timeout);
     if (ret != 0) {
         /* K_NO_WAIT reports -EBUSY, a timed-out wait reports -EAGAIN. Both are
@@ -34,13 +33,11 @@ static inline int client_lock(nmbs_z_client_t *client, k_timeout_t lock_timeout)
  * a Modbus exception code (1..4) is not lost in the errno mapping. Called with
  * client->lock held.
  */
-static inline void client_record_error(nmbs_z_client_t *client, nmbs_error err)
-{
+static inline void client_record_error(nmbs_z_client_t* client, nmbs_error err) {
     client->last_error = err;
 }
 
-nmbs_error nmbs_z_client_get_last_error(const nmbs_z_client_t *client)
-{
+nmbs_error nmbs_z_client_get_last_error(const nmbs_z_client_t* client) {
     if (client == NULL) {
         return NMBS_ERROR_INVALID_ARGUMENT;
     }
@@ -48,8 +45,7 @@ nmbs_error nmbs_z_client_get_last_error(const nmbs_z_client_t *client)
     return client->last_error;
 }
 
-int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transport)
-{
+int nmbs_z_client_init(nmbs_z_client_t* client, const nmbs_platform_conf* transport) {
     if (client == NULL || transport == NULL) {
         LOG_ERR("Client init failed: NULL parameter");
         return -EINVAL;
@@ -65,7 +61,8 @@ int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transp
     if (err != NMBS_ERROR_NONE) {
         client->last_error = err;
         LOG_ERR("Client create failed: %d", err);
-    } else {
+    }
+    else {
         nmbs_set_read_timeout(&client->core, client->read_timeout_ms);
         nmbs_set_byte_timeout(&client->core, client->byte_timeout_ms);
         LOG_DBG("Client initialized successfully");
@@ -73,8 +70,7 @@ int nmbs_z_client_init(nmbs_z_client_t *client, const nmbs_platform_conf *transp
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_set_timeouts(nmbs_z_client_t *client, int32_t read_timeout_ms, int32_t byte_timeout_ms)
-{
+int nmbs_z_client_set_timeouts(nmbs_z_client_t* client, int32_t read_timeout_ms, int32_t byte_timeout_ms) {
     if (client == NULL) {
         return -EINVAL;
     }
@@ -94,8 +90,7 @@ int nmbs_z_client_set_timeouts(nmbs_z_client_t *client, int32_t read_timeout_ms,
     return 0;
 }
 
-int nmbs_z_client_set_target_address(nmbs_z_client_t *client, uint8_t unit_id, k_timeout_t timeout)
-{
+int nmbs_z_client_set_target_address(nmbs_z_client_t* client, uint8_t unit_id, k_timeout_t timeout) {
     if (client == NULL) {
         LOG_ERR("Set target address failed: NULL client");
         return -EINVAL;
@@ -115,10 +110,8 @@ int nmbs_z_client_set_target_address(nmbs_z_client_t *client, uint8_t unit_id, k
     return 0;
 }
 
-int nmbs_z_client_read_holding_registers(nmbs_z_client_t *client, uint16_t address,
-                                         uint16_t quantity, uint16_t *registers_out,
-                                         k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_holding_registers(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                         uint16_t* registers_out, k_timeout_t lock_timeout) {
     if (client == NULL || registers_out == NULL) {
         LOG_ERR("Read holding registers failed: NULL parameter");
         return -EINVAL;
@@ -142,10 +135,8 @@ int nmbs_z_client_read_holding_registers(nmbs_z_client_t *client, uint16_t addre
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_input_registers(nmbs_z_client_t *client, uint16_t address,
-                                       uint16_t quantity, uint16_t *registers_out,
-                                       k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_input_registers(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                       uint16_t* registers_out, k_timeout_t lock_timeout) {
     if (client == NULL || registers_out == NULL) {
         LOG_ERR("Read input registers failed: NULL parameter");
         return -EINVAL;
@@ -169,10 +160,8 @@ int nmbs_z_client_read_input_registers(nmbs_z_client_t *client, uint16_t address
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_coils(nmbs_z_client_t *client, uint16_t address,
-                             uint16_t quantity, nmbs_bitfield coils_out,
-                             k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_coils(nmbs_z_client_t* client, uint16_t address, uint16_t quantity, nmbs_bitfield coils_out,
+                             k_timeout_t lock_timeout) {
     if (client == NULL || coils_out == NULL) {
         LOG_ERR("Read coils failed: NULL parameter");
         return -EINVAL;
@@ -196,10 +185,8 @@ int nmbs_z_client_read_coils(nmbs_z_client_t *client, uint16_t address,
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_discrete_inputs(nmbs_z_client_t *client, uint16_t address,
-                                       uint16_t quantity, nmbs_bitfield inputs_out,
-                                       k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_discrete_inputs(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                       nmbs_bitfield inputs_out, k_timeout_t lock_timeout) {
     if (client == NULL || inputs_out == NULL) {
         LOG_ERR("Read discrete inputs failed: NULL parameter");
         return -EINVAL;
@@ -223,9 +210,7 @@ int nmbs_z_client_read_discrete_inputs(nmbs_z_client_t *client, uint16_t address
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_single_coil(nmbs_z_client_t *client, uint16_t address,
-                                    bool value, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_single_coil(nmbs_z_client_t* client, uint16_t address, bool value, k_timeout_t lock_timeout) {
     if (client == NULL) {
         LOG_ERR("Write single coil failed: NULL client");
         return -EINVAL;
@@ -249,9 +234,8 @@ int nmbs_z_client_write_single_coil(nmbs_z_client_t *client, uint16_t address,
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_single_register(nmbs_z_client_t *client, uint16_t address,
-                                        uint16_t value, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_single_register(nmbs_z_client_t* client, uint16_t address, uint16_t value,
+                                        k_timeout_t lock_timeout) {
     if (client == NULL) {
         LOG_ERR("Write single register failed: NULL client");
         return -EINVAL;
@@ -275,10 +259,8 @@ int nmbs_z_client_write_single_register(nmbs_z_client_t *client, uint16_t addres
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_multiple_coils(nmbs_z_client_t *client, uint16_t address,
-                                       uint16_t quantity, const nmbs_bitfield coils,
-                                       k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_multiple_coils(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                       const nmbs_bitfield coils, k_timeout_t lock_timeout) {
     if (client == NULL || coils == NULL) {
         LOG_ERR("Write multiple coils failed: NULL parameter");
         return -EINVAL;
@@ -302,10 +284,8 @@ int nmbs_z_client_write_multiple_coils(nmbs_z_client_t *client, uint16_t address
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_multiple_registers(nmbs_z_client_t *client, uint16_t address,
-                                           uint16_t quantity, const uint16_t *registers,
-                                           k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_multiple_registers(nmbs_z_client_t* client, uint16_t address, uint16_t quantity,
+                                           const uint16_t* registers, k_timeout_t lock_timeout) {
     if (client == NULL || registers == NULL) {
         LOG_ERR("Write multiple registers failed: NULL parameter");
         return -EINVAL;
@@ -329,10 +309,8 @@ int nmbs_z_client_write_multiple_registers(nmbs_z_client_t *client, uint16_t add
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_file_record(nmbs_z_client_t *client, uint16_t file_number,
-                                   uint16_t record_number, uint16_t *registers_out,
-                                   uint16_t quantity, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_file_record(nmbs_z_client_t* client, uint16_t file_number, uint16_t record_number,
+                                   uint16_t* registers_out, uint16_t quantity, k_timeout_t lock_timeout) {
     if (client == NULL || registers_out == NULL) {
         LOG_ERR("Read file record failed: NULL parameter");
         return -EINVAL;
@@ -356,10 +334,8 @@ int nmbs_z_client_read_file_record(nmbs_z_client_t *client, uint16_t file_number
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_file_record(nmbs_z_client_t *client, uint16_t file_number,
-                                    uint16_t record_number, const uint16_t *registers,
-                                    uint16_t quantity, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_file_record(nmbs_z_client_t* client, uint16_t file_number, uint16_t record_number,
+                                    const uint16_t* registers, uint16_t quantity, k_timeout_t lock_timeout) {
     if (client == NULL || registers == NULL) {
         LOG_ERR("Write file record failed: NULL parameter");
         return -EINVAL;
@@ -383,11 +359,9 @@ int nmbs_z_client_write_file_record(nmbs_z_client_t *client, uint16_t file_numbe
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_write_registers(nmbs_z_client_t *client, uint16_t read_address,
-                                       uint16_t read_quantity, uint16_t *registers_out,
-                                       uint16_t write_address, uint16_t write_quantity,
-                                       const uint16_t *registers, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_write_registers(nmbs_z_client_t* client, uint16_t read_address, uint16_t read_quantity,
+                                       uint16_t* registers_out, uint16_t write_address, uint16_t write_quantity,
+                                       const uint16_t* registers, k_timeout_t lock_timeout) {
     if (client == NULL || registers_out == NULL || registers == NULL) {
         LOG_ERR("Read/write registers failed: NULL parameter");
         return -EINVAL;
@@ -399,10 +373,9 @@ int nmbs_z_client_read_write_registers(nmbs_z_client_t *client, uint16_t read_ad
         return ret;
     }
 
-    LOG_DBG("Read/write registers: rd=%u/%u, wr=%u/%u", read_address, read_quantity, write_address,
-            write_quantity);
-    nmbs_error err = nmbs_read_write_registers(&client->core, read_address, read_quantity, registers_out,
-                                               write_address, write_quantity, registers);
+    LOG_DBG("Read/write registers: rd=%u/%u, wr=%u/%u", read_address, read_quantity, write_address, write_quantity);
+    nmbs_error err = nmbs_read_write_registers(&client->core, read_address, read_quantity, registers_out, write_address,
+                                               write_quantity, registers);
     client_record_error(client, err);
     k_mutex_unlock(&client->lock);
 
@@ -413,10 +386,8 @@ int nmbs_z_client_read_write_registers(nmbs_z_client_t *client, uint16_t read_ad
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_holding_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                              uint16_t address, uint16_t quantity,
-                                              uint16_t *registers_out, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_holding_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                              uint16_t quantity, uint16_t* registers_out, k_timeout_t lock_timeout) {
     if (client == NULL || registers_out == NULL) {
         LOG_ERR("Read holding registers failed: NULL parameter");
         return -EINVAL;
@@ -441,10 +412,8 @@ int nmbs_z_client_read_holding_registers_addr(nmbs_z_client_t *client, uint8_t u
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_input_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                            uint16_t address, uint16_t quantity,
-                                            uint16_t *registers_out, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_input_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                            uint16_t quantity, uint16_t* registers_out, k_timeout_t lock_timeout) {
     if (client == NULL || registers_out == NULL) {
         LOG_ERR("Read input registers failed: NULL parameter");
         return -EINVAL;
@@ -469,10 +438,8 @@ int nmbs_z_client_read_input_registers_addr(nmbs_z_client_t *client, uint8_t uni
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                  uint16_t address, uint16_t quantity,
-                                  nmbs_bitfield coils_out, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_coils_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address, uint16_t quantity,
+                                  nmbs_bitfield coils_out, k_timeout_t lock_timeout) {
     if (client == NULL || coils_out == NULL) {
         LOG_ERR("Read coils failed: NULL parameter");
         return -EINVAL;
@@ -497,10 +464,8 @@ int nmbs_z_client_read_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_discrete_inputs_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                            uint16_t address, uint16_t quantity,
-                                            nmbs_bitfield inputs_out, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_discrete_inputs_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                            uint16_t quantity, nmbs_bitfield inputs_out, k_timeout_t lock_timeout) {
     if (client == NULL || inputs_out == NULL) {
         LOG_ERR("Read discrete inputs failed: NULL parameter");
         return -EINVAL;
@@ -525,9 +490,8 @@ int nmbs_z_client_read_discrete_inputs_addr(nmbs_z_client_t *client, uint8_t uni
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_single_coil_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                        uint16_t address, bool value, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_single_coil_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address, bool value,
+                                         k_timeout_t lock_timeout) {
     if (client == NULL) {
         LOG_ERR("Write single coil failed: NULL client");
         return -EINVAL;
@@ -552,9 +516,8 @@ int nmbs_z_client_write_single_coil_addr(nmbs_z_client_t *client, uint8_t unit_i
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_single_register_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                            uint16_t address, uint16_t value, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_single_register_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address, uint16_t value,
+                                             k_timeout_t lock_timeout) {
     if (client == NULL) {
         LOG_ERR("Write single register failed: NULL client");
         return -EINVAL;
@@ -579,10 +542,8 @@ int nmbs_z_client_write_single_register_addr(nmbs_z_client_t *client, uint8_t un
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_multiple_coils_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                           uint16_t address, uint16_t quantity,
-                                           const nmbs_bitfield coils, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_multiple_coils_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                            uint16_t quantity, const nmbs_bitfield coils, k_timeout_t lock_timeout) {
     if (client == NULL || coils == NULL) {
         LOG_ERR("Write multiple coils failed: NULL parameter");
         return -EINVAL;
@@ -607,10 +568,9 @@ int nmbs_z_client_write_multiple_coils_addr(nmbs_z_client_t *client, uint8_t uni
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_write_multiple_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                               uint16_t address, uint16_t quantity,
-                                               const uint16_t *registers, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_write_multiple_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t address,
+                                                uint16_t quantity, const uint16_t* registers,
+                                                k_timeout_t lock_timeout) {
     if (client == NULL || registers == NULL) {
         LOG_ERR("Write multiple registers failed: NULL parameter");
         return -EINVAL;
@@ -635,12 +595,10 @@ int nmbs_z_client_write_multiple_registers_addr(nmbs_z_client_t *client, uint8_t
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t *client, uint8_t unit_id,
-                                           uint16_t read_address, uint16_t read_quantity,
-                                           uint16_t *registers_out, uint16_t write_address,
-                                           uint16_t write_quantity, const uint16_t *registers,
-                                           k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t* client, uint8_t unit_id, uint16_t read_address,
+                                            uint16_t read_quantity, uint16_t* registers_out, uint16_t write_address,
+                                            uint16_t write_quantity, const uint16_t* registers,
+                                            k_timeout_t lock_timeout) {
     if (client == NULL || registers_out == NULL || registers == NULL) {
         LOG_ERR("Read/write registers failed: NULL parameter");
         return -EINVAL;
@@ -653,10 +611,10 @@ int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t *client, uint8_t uni
     }
 
     client->core.dest_address_rtu = unit_id;
-    LOG_DBG("Read/write registers: unit=%u, rd=%u/%u, wr=%u/%u", unit_id, read_address, read_quantity,
-            write_address, write_quantity);
-    nmbs_error err = nmbs_read_write_registers(&client->core, read_address, read_quantity, registers_out,
-                                               write_address, write_quantity, registers);
+    LOG_DBG("Read/write registers: unit=%u, rd=%u/%u, wr=%u/%u", unit_id, read_address, read_quantity, write_address,
+            write_quantity);
+    nmbs_error err = nmbs_read_write_registers(&client->core, read_address, read_quantity, registers_out, write_address,
+                                               write_quantity, registers);
     client_record_error(client, err);
     k_mutex_unlock(&client->lock);
 
@@ -667,12 +625,9 @@ int nmbs_z_client_read_write_registers_addr(nmbs_z_client_t *client, uint8_t uni
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_device_identification_basic(nmbs_z_client_t *client,
-                                                   char *vendor_name, char *product_code,
-                                                   char *major_minor_revision,
-                                                   uint8_t buffers_length,
-                                                   k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_device_identification_basic(nmbs_z_client_t* client, char* vendor_name, char* product_code,
+                                                   char* major_minor_revision, uint8_t buffers_length,
+                                                   k_timeout_t lock_timeout) {
     if (client == NULL || vendor_name == NULL || product_code == NULL || major_minor_revision == NULL) {
         LOG_ERR("Read device identification (basic) failed: NULL parameter");
         return -EINVAL;
@@ -696,13 +651,9 @@ int nmbs_z_client_read_device_identification_basic(nmbs_z_client_t *client,
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t *client,
-                                                     char *vendor_url, char *product_name,
-                                                     char *model_name,
-                                                     char *user_application_name,
-                                                     uint8_t buffers_length,
-                                                     k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t* client, char* vendor_url, char* product_name,
+                                                     char* model_name, char* user_application_name,
+                                                     uint8_t buffers_length, k_timeout_t lock_timeout) {
     if (client == NULL || vendor_url == NULL || product_name == NULL || model_name == NULL ||
         user_application_name == NULL) {
         LOG_ERR("Read device identification (regular) failed: NULL parameter");
@@ -715,9 +666,8 @@ int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t *client,
         return ret;
     }
 
-    nmbs_error err = nmbs_read_device_identification_regular(&client->core, vendor_url, product_name,
-                                                             model_name, user_application_name,
-                                                             buffers_length);
+    nmbs_error err = nmbs_read_device_identification_regular(&client->core, vendor_url, product_name, model_name,
+                                                             user_application_name, buffers_length);
     client_record_error(client, err);
     k_mutex_unlock(&client->lock);
 
@@ -728,13 +678,9 @@ int nmbs_z_client_read_device_identification_regular(nmbs_z_client_t *client,
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t *client,
-                                                      uint8_t object_id_start, uint8_t *ids,
-                                                      char **buffers, uint8_t ids_length,
-                                                      uint8_t buffer_length,
-                                                      uint8_t *objects_count_out,
-                                                      k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t* client, uint8_t object_id_start, uint8_t* ids,
+                                                      char** buffers, uint8_t ids_length, uint8_t buffer_length,
+                                                      uint8_t* objects_count_out, k_timeout_t lock_timeout) {
     if (client == NULL || ids == NULL || buffers == NULL || objects_count_out == NULL) {
         LOG_ERR("Read device identification (extended) failed: NULL parameter");
         return -EINVAL;
@@ -746,9 +692,8 @@ int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t *client,
         return ret;
     }
 
-    nmbs_error err = nmbs_read_device_identification_extended(&client->core, object_id_start, ids, buffers,
-                                                              ids_length, buffer_length,
-                                                              objects_count_out);
+    nmbs_error err = nmbs_read_device_identification_extended(&client->core, object_id_start, ids, buffers, ids_length,
+                                                              buffer_length, objects_count_out);
     client_record_error(client, err);
     k_mutex_unlock(&client->lock);
 
@@ -759,10 +704,8 @@ int nmbs_z_client_read_device_identification_extended(nmbs_z_client_t *client,
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_read_device_identification(nmbs_z_client_t *client, uint8_t object_id,
-                                             char *buffer, uint8_t buffer_length,
-                                             k_timeout_t lock_timeout)
-{
+int nmbs_z_client_read_device_identification(nmbs_z_client_t* client, uint8_t object_id, char* buffer,
+                                             uint8_t buffer_length, k_timeout_t lock_timeout) {
     if (client == NULL || buffer == NULL) {
         LOG_ERR("Read device identification failed: NULL parameter");
         return -EINVAL;
@@ -785,10 +728,8 @@ int nmbs_z_client_read_device_identification(nmbs_z_client_t *client, uint8_t ob
     return nmbs_z_error_to_errno(err);
 }
 
-int nmbs_z_client_raw_pdu(nmbs_z_client_t *client, uint8_t fc, const uint8_t *data,
-                          uint16_t data_length, uint8_t *response,
-                          uint8_t response_length, k_timeout_t lock_timeout)
-{
+int nmbs_z_client_raw_pdu(nmbs_z_client_t* client, uint8_t fc, const uint8_t* data, uint16_t data_length,
+                          uint8_t* response, uint8_t response_length, k_timeout_t lock_timeout) {
     if (client == NULL || (data == NULL && data_length > 0)) {
         LOG_ERR("Raw PDU failed: NULL parameter");
         return -EINVAL;

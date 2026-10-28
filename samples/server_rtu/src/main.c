@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
@@ -22,10 +22,8 @@ LOG_MODULE_REGISTER(server_rtu_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 static uint16_t holding_registers[HOLDING_REG_COUNT];
 static uint8_t coils[(COIL_COUNT + 7) / 8];
 
-static nmbs_error handle_read_holding_registers(uint16_t address, uint16_t quantity,
-                                                uint16_t *registers_out, uint8_t unit_id,
-                                                void *arg)
-{
+static nmbs_error handle_read_holding_registers(uint16_t address, uint16_t quantity, uint16_t* registers_out,
+                                                uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -40,9 +38,7 @@ static nmbs_error handle_read_holding_registers(uint16_t address, uint16_t quant
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_write_single_register(uint16_t address, uint16_t value,
-                                               uint8_t unit_id, void *arg)
-{
+static nmbs_error handle_write_single_register(uint16_t address, uint16_t value, uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -55,10 +51,8 @@ static nmbs_error handle_write_single_register(uint16_t address, uint16_t value,
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_write_multiple_registers(uint16_t address, uint16_t quantity,
-                                                  const uint16_t *registers, uint8_t unit_id,
-                                                  void *arg)
-{
+static nmbs_error handle_write_multiple_registers(uint16_t address, uint16_t quantity, const uint16_t* registers,
+                                                  uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -73,10 +67,8 @@ static nmbs_error handle_write_multiple_registers(uint16_t address, uint16_t qua
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_read_coils(uint16_t address, uint16_t quantity,
-                                    nmbs_bitfield coils_out, uint8_t unit_id,
-                                    void *arg)
-{
+static nmbs_error handle_read_coils(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out, uint8_t unit_id,
+                                    void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -93,9 +85,7 @@ static nmbs_error handle_read_coils(uint16_t address, uint16_t quantity,
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_write_single_coil(uint16_t address, bool value,
-                                           uint8_t unit_id, void *arg)
-{
+static nmbs_error handle_write_single_coil(uint16_t address, bool value, uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -106,7 +96,8 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value,
 
     if (value) {
         coils[address / 8] |= (1 << (address % 8));
-    } else {
+    }
+    else {
         coils[address / 8] &= ~(1 << (address % 8));
     }
     return NMBS_ERROR_NONE;
@@ -134,25 +125,23 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value,
 #define SERVER_SLAVE_ADDR 1
 #endif
 
-static const char *rx_mode_name(nmbs_z_serial_rx_mode_t mode)
-{
+static const char* rx_mode_name(nmbs_z_serial_rx_mode_t mode) {
     switch (mode) {
-    case NMBS_Z_SERIAL_RX_IRQ:
-        return "IRQ";
-    case NMBS_Z_SERIAL_RX_ASYNC:
-        return "async/DMA";
-    case NMBS_Z_SERIAL_RX_EXTERNAL:
-    default:
-        return "external polling";
+        case NMBS_Z_SERIAL_RX_IRQ:
+            return "IRQ";
+        case NMBS_Z_SERIAL_RX_ASYNC:
+            return "async/DMA";
+        case NMBS_Z_SERIAL_RX_EXTERNAL:
+        default:
+            return "external polling";
     }
 }
 
-int main(void)
-{
+int main(void) {
     LOG_INF("nanoMODBUS RTU Server Sample Application Starting...");
 
     for (int i = 0; i < HOLDING_REG_COUNT; i++) {
-        holding_registers[i] = (uint16_t)(0x1000 + i);
+        holding_registers[i] = (uint16_t) (0x1000 + i);
     }
 
 #if DT_NODE_EXISTS(MODBUS_NODE)
@@ -166,11 +155,11 @@ int main(void)
     }
 
     nmbs_callbacks cbs = {
-        .read_holding_registers = handle_read_holding_registers,
-        .write_single_register = handle_write_single_register,
-        .write_multiple_registers = handle_write_multiple_registers,
-        .read_coils = handle_read_coils,
-        .write_single_coil = handle_write_single_coil,
+            .read_holding_registers = handle_read_holding_registers,
+            .write_single_register = handle_write_single_register,
+            .write_multiple_registers = handle_write_multiple_registers,
+            .read_coils = handle_read_coils,
+            .write_single_coil = handle_write_single_coil,
     };
 
     /* Static storage: the instance owns a workqueue thread stack. */
@@ -186,7 +175,8 @@ int main(void)
     ret = nmbs_z_shell_register_server_rtu("srv0", &server);
     if (ret != 0) {
         LOG_WRN("Failed to register server with shell: %d", ret);
-    } else {
+    }
+    else {
         LOG_INF("Registered server 'srv0' with shell CLI");
     }
 #endif
@@ -197,16 +187,17 @@ int main(void)
         return ret;
     }
 
-    LOG_INF("Modbus RTU Server started (slave ID %u, %u bps, RX %s)",
-            (unsigned int)SERVER_SLAVE_ADDR, config.baud_rate, rx_mode_name(config.rx_mode));
+    LOG_INF("Modbus RTU Server started (slave ID %u, %u bps, RX %s)", (unsigned int) SERVER_SLAVE_ADDR,
+            config.baud_rate, rx_mode_name(config.rx_mode));
 
     if (config.rx_mode == NMBS_Z_SERIAL_RX_EXTERNAL && config.uart_dev && device_is_ready(config.uart_dev)) {
         LOG_INF("Polling UART for incoming Modbus frames...");
         while (1) {
             unsigned char c;
             if (uart_poll_in(config.uart_dev, &c) == 0) {
-                nmbs_z_server_rtu_rx_byte(&server, (uint8_t)c);
-            } else {
+                nmbs_z_server_rtu_rx_byte(&server, (uint8_t) c);
+            }
+            else {
                 k_sleep(K_MSEC(1));
             }
         }

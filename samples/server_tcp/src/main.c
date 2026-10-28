@@ -10,11 +10,11 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/net/net_if.h>
-#include <zephyr/net/dhcpv4.h>
-#include <zephyr/net/net_ip.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
+#include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/net_ip.h>
 
 LOG_MODULE_REGISTER(server_tcp_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 
@@ -25,10 +25,8 @@ LOG_MODULE_REGISTER(server_tcp_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 static uint16_t holding_registers[HOLDING_REG_COUNT];
 static uint8_t coils[(COIL_COUNT + 7) / 8];
 
-static nmbs_error handle_read_holding_registers(uint16_t address, uint16_t quantity,
-                                                uint16_t *registers_out, uint8_t unit_id,
-                                                void *arg)
-{
+static nmbs_error handle_read_holding_registers(uint16_t address, uint16_t quantity, uint16_t* registers_out,
+                                                uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -43,9 +41,7 @@ static nmbs_error handle_read_holding_registers(uint16_t address, uint16_t quant
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_write_single_register(uint16_t address, uint16_t value,
-                                               uint8_t unit_id, void *arg)
-{
+static nmbs_error handle_write_single_register(uint16_t address, uint16_t value, uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -58,10 +54,8 @@ static nmbs_error handle_write_single_register(uint16_t address, uint16_t value,
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_write_multiple_registers(uint16_t address, uint16_t quantity,
-                                                  const uint16_t *registers, uint8_t unit_id,
-                                                  void *arg)
-{
+static nmbs_error handle_write_multiple_registers(uint16_t address, uint16_t quantity, const uint16_t* registers,
+                                                  uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -76,9 +70,8 @@ static nmbs_error handle_write_multiple_registers(uint16_t address, uint16_t qua
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_read_coils(uint16_t address, uint16_t quantity,
-                                    nmbs_bitfield coils_out, uint8_t unit_id, void *arg)
-{
+static nmbs_error handle_read_coils(uint16_t address, uint16_t quantity, nmbs_bitfield coils_out, uint8_t unit_id,
+                                    void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -95,9 +88,7 @@ static nmbs_error handle_read_coils(uint16_t address, uint16_t quantity,
     return NMBS_ERROR_NONE;
 }
 
-static nmbs_error handle_write_single_coil(uint16_t address, bool value, uint8_t unit_id,
-                                           void *arg)
-{
+static nmbs_error handle_write_single_coil(uint16_t address, bool value, uint8_t unit_id, void* arg) {
     ARG_UNUSED(unit_id);
     ARG_UNUSED(arg);
 
@@ -108,7 +99,8 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value, uint8_t
 
     if (value) {
         coils[address / 8] |= (1 << (address % 8));
-    } else {
+    }
+    else {
         coils[address / 8] &= ~(1 << (address % 8));
     }
     return NMBS_ERROR_NONE;
@@ -118,14 +110,13 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value, uint8_t
  * Log the DHCP lease once it arrives so the address to use from a Modbus TCP
  * client is visible on the console.
  */
-static void log_ipv4_address(void)
-{
-    struct net_if *iface = net_if_get_default();
+static void log_ipv4_address(void) {
+    struct net_if* iface = net_if_get_default();
     if (iface == NULL) {
         return;
     }
 
-    struct net_in_addr *addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+    struct net_in_addr* addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
     if (addr == NULL) {
         return;
     }
@@ -139,20 +130,19 @@ static void log_ipv4_address(void)
     LOG_INF("Modbus TCP server listening on %s:%u", buf, MODBUS_TCP_PORT);
 }
 
-int main(void)
-{
+int main(void) {
     LOG_INF("nanoMODBUS TCP Server Sample Application Starting...");
 
     for (int i = 0; i < HOLDING_REG_COUNT; i++) {
-        holding_registers[i] = (uint16_t)(0x1000 + i);
+        holding_registers[i] = (uint16_t) (0x1000 + i);
     }
 
     nmbs_callbacks cbs = {
-        .read_holding_registers = handle_read_holding_registers,
-        .write_single_register = handle_write_single_register,
-        .write_multiple_registers = handle_write_multiple_registers,
-        .read_coils = handle_read_coils,
-        .write_single_coil = handle_write_single_coil,
+            .read_holding_registers = handle_read_holding_registers,
+            .write_single_register = handle_write_single_register,
+            .write_multiple_registers = handle_write_multiple_registers,
+            .read_coils = handle_read_coils,
+            .write_single_coil = handle_write_single_coil,
     };
 
     /* Static storage: the instance embeds the listener thread stack. */
@@ -175,7 +165,7 @@ int main(void)
     /* Asking for a lease before the link is up is harmless: the DHCP client
      * waits for carrier and retransmits on its own.
      */
-    struct net_if *iface = net_if_get_default();
+    struct net_if* iface = net_if_get_default();
 
     if (iface == NULL) {
         LOG_ERR("No network interface available");
@@ -183,8 +173,7 @@ int main(void)
     }
 
     net_dhcpv4_start(iface);
-    LOG_INF("Waiting for a DHCPv4 lease (carrier %s)",
-            net_if_is_carrier_ok(iface) ? "up" : "down");
+    LOG_INF("Waiting for a DHCPv4 lease (carrier %s)", net_if_is_carrier_ok(iface) ? "up" : "down");
 
     bool logged_address = false;
 

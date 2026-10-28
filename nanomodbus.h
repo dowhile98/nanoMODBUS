@@ -123,7 +123,8 @@ typedef uint8_t nmbs_bitfield_256[32];
 /**
  * Write value v to the nmbs_bitfield bf at position b
  */
-#define nmbs_bitfield_write(bf, b, v) ((bf)[(b) >> 3] = ((bf)[(b) >> 3] & ~(1U << ((b) & 7))) | (((v) ? 1U : 0U) << ((b) & 7)))
+#define nmbs_bitfield_write(bf, b, v)                                                                                  \
+    ((bf)[(b) >> 3] = ((bf)[(b) >> 3] & ~(1U << ((b) &7))) | (((v) ? 1U : 0U) << ((b) &7)))
 /**
  * Reset (zero) the whole bitfield
  */

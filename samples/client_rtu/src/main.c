@@ -11,10 +11,10 @@
  * hardware `de-enable` in devicetree) if your transceiver needs DE control.
  */
 
-#include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
@@ -50,21 +50,19 @@ LOG_MODULE_REGISTER(client_rtu_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 #define SERVER_ADDRESS 1
 #endif
 
-static const char *rx_mode_name(nmbs_z_serial_rx_mode_t mode)
-{
+static const char* rx_mode_name(nmbs_z_serial_rx_mode_t mode) {
     switch (mode) {
-    case NMBS_Z_SERIAL_RX_IRQ:
-        return "IRQ";
-    case NMBS_Z_SERIAL_RX_ASYNC:
-        return "async/DMA";
-    case NMBS_Z_SERIAL_RX_EXTERNAL:
-    default:
-        return "external polling";
+        case NMBS_Z_SERIAL_RX_IRQ:
+            return "IRQ";
+        case NMBS_Z_SERIAL_RX_ASYNC:
+            return "async/DMA";
+        case NMBS_Z_SERIAL_RX_EXTERNAL:
+        default:
+            return "external polling";
     }
 }
 
-int main(void)
-{
+int main(void) {
     LOG_INF("nanoMODBUS RTU Client Sample Application Starting...");
 
 #if DT_NODE_EXISTS(MODBUS_NODE)
@@ -99,7 +97,8 @@ int main(void)
     ret = nmbs_z_shell_register_client("rtu0", &client);
     if (ret != 0) {
         LOG_WRN("Failed to register client with shell: %d", ret);
-    } else {
+    }
+    else {
         LOG_INF("Registered client 'rtu0' with shell CLI");
     }
 #endif
@@ -110,8 +109,7 @@ int main(void)
         return ret;
     }
 
-    LOG_INF("Modbus RTU client started (server %u, 115200 bps, RX %s)", SERVER_ADDRESS,
-            rx_mode_name(config.rx_mode));
+    LOG_INF("Modbus RTU client started (server %u, 115200 bps, RX %s)", SERVER_ADDRESS, rx_mode_name(config.rx_mode));
 
     uint16_t heartbeat = 0;
 
@@ -120,16 +118,18 @@ int main(void)
 
         ret = nmbs_z_client_read_holding_registers(&client, 0, READ_QUANTITY, registers, K_MSEC(500));
         if (ret == 0) {
-            LOG_INF("Holding registers [0..%d]: %u, %u, %u, %u", READ_QUANTITY - 1, registers[0],
-                    registers[1], registers[2], registers[3]);
-        } else {
+            LOG_INF("Holding registers [0..%d]: %u, %u, %u, %u", READ_QUANTITY - 1, registers[0], registers[1],
+                    registers[2], registers[3]);
+        }
+        else {
             LOG_WRN("Read failed: %d (nmbs_error %d)", ret, nmbs_z_client_get_last_error(&client));
         }
 
         ret = nmbs_z_client_write_single_register(&client, HEARTBEAT_REGISTER, heartbeat, K_MSEC(500));
         if (ret == 0) {
             LOG_INF("Heartbeat register [%u] <- %u", HEARTBEAT_REGISTER, heartbeat);
-        } else {
+        }
+        else {
             LOG_WRN("Write failed: %d (nmbs_error %d)", ret, nmbs_z_client_get_last_error(&client));
         }
 
