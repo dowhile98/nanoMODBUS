@@ -145,10 +145,17 @@ request execution, server diagnostics, and instance enumeration without dynamic 
 - Per-function-code `NMBS_CLIENT_*_DISABLED` macros are defined but not honored
   by the upstream core; only `NMBS_CLIENT_DISABLED` and the `NMBS_SERVER_*`
   macros actually prune code.
-- GitHub CI (`ci.yml`, `workflow_dispatch` only) builds/tests the host CMake
-  project and builds the Arduino/RP2040/STM32 examples, but never the Zephyr
-  module. Validate Zephyr builds/tests locally.
-  `clang-format-check.yml` pins clang-format 13 (local is newer), so format
-  touched files only.
+- GitHub CI (`ci.yml`) runs on push to `master`/`feature/**`, on pull requests
+  and on `workflow_dispatch`: host CMake build + `ctest`, the Zephyr Ztest suite
+  on `native_sim` (Zephyr pinned by the `ZEPHYR_VERSION` env var, currently
+  v4.4.2) and the Arduino/RP2040/STM32 examples. The ARM example jobs are pinned
+  to `ubuntu-24.04` because gcc-arm-none-eabi 14+ rejects the implicit
+  declarations in those examples. `clang-format-check.yml` pins clang-format 13
+  (local is newer), so always format touched files with clang-format 13 itself
+  (`pip install clang-format==13.0.1`), never with the newer local binary.
+- Blocks of `SHELL_CMD_ARG(...)` with hyphenated command names (`read-coils`,
+  `write-register`, ...) must stay inside `clang-format off`/`on`:
+  clang-format parses them as subtraction and renames the commands to
+  `read - coils`, which silently breaks the shell CLI.
 - `AGENTS.md` is listed in `.gitignore`; changes here will not appear in
   `git status` unless force-added (`git status --ignored` or `git add -f AGENTS.md`).
