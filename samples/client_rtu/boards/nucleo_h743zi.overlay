@@ -5,9 +5,9 @@
  * USART2 is the Modbus RTU bus on PD5 (TX) / PD6 (RX). The console uses the
  * ST-LINK virtual COM port (USART3), so the two do not conflict.
  *
- * No RS-485 driver-enable is configured: the bench converter is full duplex.
- * For a half-duplex transceiver add a `de-gpios` property or `modbus-de` GPIO alias,
- * or switch the UART to hardware DE (`de-enable` plus the RTS pin in pinctrl-0).
+ * PD4 drives the RS-485 transceiver RE/DE pin in software GPIO mode.
+ * Because RE (active-low) and DE (active-high) are tied together on this
+ * transceiver, a single active-high GPIO acts as both: high = TX, low = RX.
  */
 
 / {
@@ -28,6 +28,7 @@
 		status = "okay";
 		#address-cells = <1>;
 		#size-cells = <0>;
+		de-gpios = <&gpiod 4 GPIO_ACTIVE_HIGH>;
 		de-mode = "auto";
 		rx-mode = "auto";
 
