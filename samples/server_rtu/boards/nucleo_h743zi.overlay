@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: MIT
  *
  * USART2 on the Nucleo-H743ZI is wired to the ST-LINK virtual COM port.
- * PD4 is USART2_RTS (AF7) and drives the RS-485 transceiver DE pin in
- * hardware, so no software GPIO DE is needed on this board.
+ * PD4 drives the RS-485 transceiver RE/DE pin in software GPIO mode.
+ * Because RE (active-low) and DE (active-high) are tied together on this
+ * transceiver, a single active-high GPIO acts as both: high = TX, low = RX.
  *
  * The two DMA channels let the transport use NMBS_Z_SERIAL_RX_ASYNC.
  */
@@ -17,12 +18,9 @@
 };
 
 &usart2 {
-	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6 &usart2_rts_pd4>;
+	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
-	de-enable;
-	de-assert-time = <4>;
-	de-deassert-time = <4>;
 	dmas = <&dmamux1 2 44 STM32_DMA_PERIPH_TX>,
 	       <&dmamux1 3 43 STM32_DMA_PERIPH_RX>;
 	dma-names = "tx", "rx";
@@ -33,6 +31,7 @@
 		status = "okay";
 		#address-cells = <1>;
 		#size-cells = <0>;
+		de-gpios = <&gpiod 4 GPIO_ACTIVE_HIGH>;
 		de-mode = "auto";
 		rx-mode = "auto";
 
