@@ -173,7 +173,7 @@ struct nmbs_z_cli_options {
 	uint8_t unit_id;
 	bool unit_id_specified;
 	int32_t timeout_ms;
-	size_t positional_idx[8];
+	size_t positional_idx[128];
 	size_t positional_count;
 };
 

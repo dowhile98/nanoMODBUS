@@ -9,6 +9,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #ifdef CONFIG_NANOMODBUS_SHELL_CLIENT
 
@@ -348,3 +349,532 @@ int nmbs_z_shell_parse_options(const struct shell *sh, size_t argc, char **argv,
 
 	return 0;
 }
+
+#ifdef CONFIG_NANOMODBUS_SHELL_CLIENT
+
+static void format_registers_table(const struct shell *sh, uint16_t start_addr, const uint16_t *regs, uint16_t count)
+{
+	char line_buf[128];
+
+	for (uint16_t i = 0; i < count; i += 4) {
+		uint16_t addr = start_addr + i;
+		int len = snprintf(line_buf, sizeof(line_buf), "[0x%04X / %05u]:", addr, addr);
+
+		for (uint16_t j = 0; j < 4 && (i + j) < count; j++) {
+			uint16_t val = regs[i + j];
+			len += snprintf(line_buf + len, sizeof(line_buf) - len, " %6u (0x%04X)", val, val);
+		}
+		shell_print(sh, "%s", line_buf);
+	}
+}
+
+static void format_coils_bitfield(const struct shell *sh, uint16_t start_addr, const nmbs_bitfield coils, uint16_t count)
+{
+	char line_buf[128];
+
+	for (uint16_t i = 0; i < count; i += 8) {
+		uint16_t addr = start_addr + i;
+		int len = snprintf(line_buf, sizeof(line_buf), "[0x%04X / %05u]:", addr, addr);
+		uint8_t byte_val = 0;
+
+		for (uint16_t j = 0; j < 8 && (i + j) < count; j++) {
+			bool b = nmbs_bitfield_read(coils, i + j);
+			if (b) {
+				byte_val |= (1U << j);
+			}
+			len += snprintf(line_buf + len, sizeof(line_buf) - len, "  %c", b ? '1' : '0');
+		}
+
+		uint16_t printed = ((count - i) < 8) ? (count - i) : 8;
+		for (uint16_t pad = printed; pad < 8; pad++) {
+			len += snprintf(line_buf + len, sizeof(line_buf) - len, "   ");
+		}
+
+		snprintf(line_buf + len, sizeof(line_buf) - len, "  (0x%02X)", byte_val);
+		shell_print(sh, "%s", line_buf);
+	}
+}
+
+static struct client_entry *resolve_client(const struct shell *sh, const struct nmbs_z_cli_options *opts)
+{
+	if (opts->client_name) {
+		struct client_entry *entry = nmbs_z_shell_find_client(opts->client_name);
+		if (!entry) {
+			shell_error(sh, "Client '%s' not found. Run 'nmbs list'", opts->client_name);
+			return NULL;
+		}
+		return entry;
+	}
+
+	if (s_client_count == 0) {
+		shell_error(sh, "No Modbus client registered.");
+		return NULL;
+	}
+
+	if (s_client_count > 1) {
+		shell_error(sh, "Multiple clients registered. Specify target with -c <client_name>.");
+		return NULL;
+	}
+
+	return &s_clients[0];
+}
+
+static int report_client_error(const struct shell *sh, nmbs_z_client_t *client, int ret)
+{
+	nmbs_error raw = nmbs_z_client_get_last_error(client);
+
+	if (ret == -EBUSY || (ret == -ETIMEDOUT && raw != NMBS_ERROR_TIMEOUT)) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+	} else if (nmbs_error_is_exception(raw)) {
+		shell_error(sh, "Modbus Exception: %s (Code 0x%02X)", nmbs_z_strerror(raw), (uint8_t)raw);
+	} else {
+		shell_error(sh, "Communication Error: %s (errno %d)", nmbs_z_strerror(raw), ret);
+	}
+	return ret;
+}
+
+static int cmd_nmbs_read_holding(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs read-holding [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t qty = 0;
+	ret = nmbs_z_shell_parse_quantity(sh, argv[opts.positional_idx[1]], CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS, &qty);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t data[CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS];
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_read_holding_registers_addr(entry->client, opts.unit_id, addr, qty, data, timeout);
+	} else {
+		ret = nmbs_z_client_read_holding_registers(entry->client, addr, qty, data, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	format_registers_table(sh, addr, data, qty);
+	return 0;
+}
+
+static int cmd_nmbs_read_input(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs read-input [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t qty = 0;
+	ret = nmbs_z_shell_parse_quantity(sh, argv[opts.positional_idx[1]], CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS, &qty);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t data[CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS];
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_read_input_registers_addr(entry->client, opts.unit_id, addr, qty, data, timeout);
+	} else {
+		ret = nmbs_z_client_read_input_registers(entry->client, addr, qty, data, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	format_registers_table(sh, addr, data, qty);
+	return 0;
+}
+
+static int cmd_nmbs_read_coils(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs read-coils [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t max_coils = CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS * 16;
+	if (max_coils > 2000) {
+		max_coils = 2000;
+	}
+	uint16_t qty = 0;
+	ret = nmbs_z_shell_parse_quantity(sh, argv[opts.positional_idx[1]], max_coils, &qty);
+	if (ret != 0) {
+		return ret;
+	}
+
+	nmbs_bitfield coils;
+	memset(coils, 0, sizeof(coils));
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_read_coils_addr(entry->client, opts.unit_id, addr, qty, coils, timeout);
+	} else {
+		ret = nmbs_z_client_read_coils(entry->client, addr, qty, coils, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	format_coils_bitfield(sh, addr, coils, qty);
+	return 0;
+}
+
+static int cmd_nmbs_read_discrete(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs read-discrete [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t max_inputs = CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS * 16;
+	if (max_inputs > 2000) {
+		max_inputs = 2000;
+	}
+	uint16_t qty = 0;
+	ret = nmbs_z_shell_parse_quantity(sh, argv[opts.positional_idx[1]], max_inputs, &qty);
+	if (ret != 0) {
+		return ret;
+	}
+
+	nmbs_bitfield inputs;
+	memset(inputs, 0, sizeof(inputs));
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_read_discrete_inputs_addr(entry->client, opts.unit_id, addr, qty, inputs, timeout);
+	} else {
+		ret = nmbs_z_client_read_discrete_inputs(entry->client, addr, qty, inputs, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	format_coils_bitfield(sh, addr, inputs, qty);
+	return 0;
+}
+
+static int cmd_nmbs_write_coil(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs write-coil [-c <client>] [-u <unit>] [-t <ms>] <addr> <val>");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	bool val = false;
+	ret = nmbs_z_shell_parse_bool(sh, argv[opts.positional_idx[1]], "value", &val);
+	if (ret != 0) {
+		return ret;
+	}
+
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_write_single_coil_addr(entry->client, opts.unit_id, addr, val, timeout);
+	} else {
+		ret = nmbs_z_client_write_single_coil(entry->client, addr, val, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	uint8_t unit = opts.unit_id_specified ? opts.unit_id : entry->client->core.dest_address_rtu;
+	if (unit == 0 && !opts.unit_id_specified) {
+		unit = 1;
+	}
+	shell_print(sh, "OK: Wrote coil at address 0x%04X (%u) = %s on client '%s' (unit %u)",
+		    addr, addr, val ? "ON" : "OFF", entry->name, unit);
+	return 0;
+}
+
+static int cmd_nmbs_write_register(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs write-register [-c <client>] [-u <unit>] [-t <ms>] <addr> <val>");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t val = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[1]], "value", &val);
+	if (ret != 0) {
+		return ret;
+	}
+
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_write_single_register_addr(entry->client, opts.unit_id, addr, val, timeout);
+	} else {
+		ret = nmbs_z_client_write_single_register(entry->client, addr, val, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	uint8_t unit = opts.unit_id_specified ? opts.unit_id : entry->client->core.dest_address_rtu;
+	if (unit == 0 && !opts.unit_id_specified) {
+		unit = 1;
+	}
+	shell_print(sh, "OK: Wrote register at address 0x%04X (%u) = %u (0x%04X) on client '%s' (unit %u)",
+		    addr, addr, val, val, entry->name, unit);
+	return 0;
+}
+
+static int cmd_nmbs_write_coils(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs write-coils [-c <client>] [-u <unit>] [-t <ms>] <addr> <val0> [val1...]");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t qty = (uint16_t)(opts.positional_count - 1);
+	uint16_t max_coils = CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS * 16;
+	if (max_coils > 2000) {
+		max_coils = 2000;
+	}
+	if (qty > max_coils) {
+		shell_error(sh, "Too many coils: %u (max %u)", qty, max_coils);
+		return -EINVAL;
+	}
+
+	nmbs_bitfield coils;
+	memset(coils, 0, sizeof(coils));
+
+	for (uint16_t i = 0; i < qty; i++) {
+		bool b = false;
+		ret = nmbs_z_shell_parse_bool(sh, argv[opts.positional_idx[1 + i]], "coil value", &b);
+		if (ret != 0) {
+			return ret;
+		}
+		nmbs_bitfield_write(coils, i, b);
+	}
+
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_write_multiple_coils_addr(entry->client, opts.unit_id, addr, qty, coils, timeout);
+	} else {
+		ret = nmbs_z_client_write_multiple_coils(entry->client, addr, qty, coils, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	uint8_t unit = opts.unit_id_specified ? opts.unit_id : entry->client->core.dest_address_rtu;
+	if (unit == 0 && !opts.unit_id_specified) {
+		unit = 1;
+	}
+	shell_print(sh, "OK: Wrote %u coil(s) starting at address 0x%04X (%u) on client '%s' (unit %u)",
+		    qty, addr, addr, entry->name, unit);
+	return 0;
+}
+
+static int cmd_nmbs_write_registers(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (opts.positional_count < 2) {
+		shell_error(sh, "Usage: nmbs write-registers [-c <client>] [-u <unit>] [-t <ms>] <addr> <val0> [val1...]");
+		return -EINVAL;
+	}
+
+	struct client_entry *entry = resolve_client(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	uint16_t addr = 0;
+	ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[0]], "address", &addr);
+	if (ret != 0) {
+		return ret;
+	}
+
+	uint16_t qty = (uint16_t)(opts.positional_count - 1);
+	if (qty > CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS) {
+		shell_error(sh, "Too many registers: %u (max %u)", qty, CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS);
+		return -EINVAL;
+	}
+
+	uint16_t data[CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS];
+
+	for (uint16_t i = 0; i < qty; i++) {
+		ret = nmbs_z_shell_parse_u16(sh, argv[opts.positional_idx[1 + i]], "register value", &data[i]);
+		if (ret != 0) {
+			return ret;
+		}
+	}
+
+	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+
+	if (opts.unit_id_specified) {
+		ret = nmbs_z_client_write_multiple_registers_addr(entry->client, opts.unit_id, addr, qty, data, timeout);
+	} else {
+		ret = nmbs_z_client_write_multiple_registers(entry->client, addr, qty, data, timeout);
+	}
+
+	if (ret < 0) {
+		return report_client_error(sh, entry->client, ret);
+	}
+
+	uint8_t unit = opts.unit_id_specified ? opts.unit_id : entry->client->core.dest_address_rtu;
+	if (unit == 0 && !opts.unit_id_specified) {
+		unit = 1;
+	}
+	shell_print(sh, "OK: Wrote %u register(s) starting at address 0x%04X (%u) on client '%s' (unit %u)",
+		    qty, addr, addr, entry->name, unit);
+	return 0;
+}
+
+#endif /* CONFIG_NANOMODBUS_SHELL_CLIENT */
+
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_nmbs,
+#ifdef CONFIG_NANOMODBUS_SHELL_CLIENT
+	SHELL_CMD_ARG(read-coils, NULL, "Read coils (FC 01)", cmd_nmbs_read_coils, 3, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(read-discrete, NULL, "Read discrete inputs (FC 02)", cmd_nmbs_read_discrete, 3, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(read-holding, NULL, "Read holding registers (FC 03)", cmd_nmbs_read_holding, 3, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(read-input, NULL, "Read input registers (FC 04)", cmd_nmbs_read_input, 3, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(write-coil, NULL, "Write single coil (FC 05)", cmd_nmbs_write_coil, 3, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(write-register, NULL, "Write single register (FC 06)", cmd_nmbs_write_register, 3, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(write-coils, NULL, "Write multiple coils (FC 15)", cmd_nmbs_write_coils, 3, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(write-registers, NULL, "Write multiple registers (FC 16)", cmd_nmbs_write_registers, 3, SHELL_OPT_ARG_CHECK_SKIP),
+#endif
+	SHELL_SUBCMD_SET_END
+);
+
+SHELL_CMD_REGISTER(nmbs, &sub_nmbs, "nanoMODBUS commands", NULL);
+
