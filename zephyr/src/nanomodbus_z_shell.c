@@ -4,8 +4,11 @@
  */
 
 #include <zephyr/nanomodbus/nanomodbus_z_shell.h>
+#include <zephyr/shell/shell.h>
 #include <errno.h>
 #include <string.h>
+#include <strings.h>
+#include <stdlib.h>
 
 #ifdef CONFIG_NANOMODBUS_SHELL_CLIENT
 
@@ -188,3 +191,160 @@ int nmbs_z_shell_register_server_tcp(const char *name, nmbs_z_server_tcp_t *serv
 #endif
 
 #endif /* CONFIG_NANOMODBUS_SHELL_SERVER */
+
+int nmbs_z_shell_parse_u16(const struct shell *sh, const char *str, const char *param_name, uint16_t *val_out)
+{
+	if (!str || !val_out) {
+		return -EINVAL;
+	}
+
+	char *endptr = NULL;
+	errno = 0;
+	unsigned long parsed = strtoul(str, &endptr, 0);
+
+	if (*str == '\0' || *endptr != '\0' || errno == ERANGE) {
+		if (sh) {
+			shell_error(sh, "Invalid number format for %s: '%s'", param_name, str);
+		}
+		return -EINVAL;
+	}
+
+	if (parsed > 0xFFFF) {
+		if (sh) {
+			shell_error(sh, "%s overflow (>65535): '%s'", param_name, str);
+		}
+		return -ERANGE;
+	}
+
+	*val_out = (uint16_t)parsed;
+	return 0;
+}
+
+int nmbs_z_shell_parse_quantity(const struct shell *sh, const char *str, uint16_t max_qty, uint16_t *qty_out)
+{
+	uint16_t qty = 0;
+	int ret = nmbs_z_shell_parse_u16(sh, str, "quantity", &qty);
+
+	if (ret != 0) {
+		return ret;
+	}
+
+	if (qty < 1 || qty > max_qty) {
+		if (sh) {
+			shell_error(sh, "Quantity must be between 1 and %u (requested %u)", max_qty, qty);
+		}
+		return -EINVAL;
+	}
+
+	if (qty_out) {
+		*qty_out = qty;
+	}
+	return 0;
+}
+
+int nmbs_z_shell_parse_bool(const struct shell *sh, const char *str, const char *param_name, bool *val_out)
+{
+	if (!str || !val_out) {
+		return -EINVAL;
+	}
+
+	if (strcasecmp(str, "1") == 0 || strcasecmp(str, "on") == 0 ||
+	    strcasecmp(str, "true") == 0 || strcasecmp(str, "high") == 0) {
+		*val_out = true;
+		return 0;
+	}
+
+	if (strcasecmp(str, "0") == 0 || strcasecmp(str, "off") == 0 ||
+	    strcasecmp(str, "false") == 0 || strcasecmp(str, "low") == 0) {
+		*val_out = false;
+		return 0;
+	}
+
+	if (sh) {
+		shell_error(sh, "Invalid boolean value for %s: '%s'. Expected on/off, true/false, 1/0, high/low",
+			    param_name, str);
+	}
+	return -EINVAL;
+}
+
+int nmbs_z_shell_parse_options(const struct shell *sh, size_t argc, char **argv, struct nmbs_z_cli_options *opts)
+{
+	if (!argv || !opts) {
+		return -EINVAL;
+	}
+
+	memset(opts, 0, sizeof(*opts));
+	opts->timeout_ms = -1;
+
+	for (size_t i = 1; i < argc; i++) {
+		if (argv[i][0] == '-') {
+			if (strcmp(argv[i], "-c") == 0) {
+				if (++i >= argc) {
+					if (sh) {
+						shell_error(sh, "Option -c requires an argument");
+					}
+					return -EINVAL;
+				}
+				opts->client_name = argv[i];
+			} else if (strcmp(argv[i], "-s") == 0) {
+				if (++i >= argc) {
+					if (sh) {
+						shell_error(sh, "Option -s requires an argument");
+					}
+					return -EINVAL;
+				}
+				opts->server_name = argv[i];
+			} else if (strcmp(argv[i], "-u") == 0) {
+				if (++i >= argc) {
+					if (sh) {
+						shell_error(sh, "Option -u requires an argument");
+					}
+					return -EINVAL;
+				}
+				char *endptr = NULL;
+				unsigned long u = strtoul(argv[i], &endptr, 0);
+
+				if (*argv[i] == '\0' || *endptr != '\0' || u > 247) {
+					if (sh) {
+						shell_error(sh, "Invalid unit ID: '%s'", argv[i]);
+					}
+					return -EINVAL;
+				}
+				opts->unit_id = (uint8_t)u;
+				opts->unit_id_specified = true;
+			} else if (strcmp(argv[i], "-t") == 0) {
+				if (++i >= argc) {
+					if (sh) {
+						shell_error(sh, "Option -t requires an argument");
+					}
+					return -EINVAL;
+				}
+				char *endptr = NULL;
+				long t = strtol(argv[i], &endptr, 0);
+
+				if (*argv[i] == '\0' || *endptr != '\0' || t < 0) {
+					if (sh) {
+						shell_error(sh, "Invalid timeout: '%s'", argv[i]);
+					}
+					return -EINVAL;
+				}
+				opts->timeout_ms = (int32_t)t;
+			} else {
+				if (sh) {
+					shell_error(sh, "Unknown option: %s", argv[i]);
+				}
+				return -EINVAL;
+			}
+		} else {
+			if (opts->positional_count >= ARRAY_SIZE(opts->positional_idx)) {
+				if (sh) {
+					shell_error(sh, "Too many positional arguments");
+				}
+				return -EINVAL;
+			}
+			opts->positional_idx[opts->positional_count++] = i;
+		}
+	}
+
+	return 0;
+}

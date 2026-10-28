@@ -78,3 +78,102 @@ ZTEST(nanomodbus_shell, test_shell_register_server_lifecycle)
     zassert_equal(nmbs_z_shell_unregister_server("srv0"), -ENOENT, "Exp -ENOENT");
 }
 
+ZTEST(nanomodbus_shell, test_shell_parser_radix_valid)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    uint16_t val = 0;
+
+    /* Decimal */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "1234", "test", &val), 0, "Decimal parse failed");
+    zassert_equal(val, 1234, "Decimal value mismatch");
+
+    /* Hexadecimal */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "0x04D2", "test", &val), 0, "Hex parse failed");
+    zassert_equal(val, 1234, "Hex value mismatch");
+
+    /* Hexadecimal boundary 0xFFFF */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "0xFFFF", "test", &val), 0, "Max hex parse failed");
+    zassert_equal(val, 65535, "Max hex value mismatch");
+}
+
+ZTEST(nanomodbus_shell, test_shell_parser_malformed_radix)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    uint16_t val = 0;
+
+    /* Invalid hex char */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "0xZZ", "addr", &val), -EINVAL, "Expected -EINVAL for 0xZZ");
+
+    /* Empty string */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "", "addr", &val), -EINVAL, "Expected -EINVAL for empty");
+
+    /* Trailing garbage */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "123abc", "addr", &val), -EINVAL, "Expected -EINVAL for trailing text");
+
+    /* Numerical overflow (> 65535) */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "70000", "addr", &val), -ERANGE, "Expected -ERANGE on overflow");
+}
+
+ZTEST(nanomodbus_shell, test_shell_parser_quantity_boundary_overflow)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    uint16_t qty = 0;
+
+    /* Zero quantity */
+    zassert_equal(nmbs_z_shell_parse_quantity(sh, "0", CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS, &qty),
+                  -EINVAL, "Zero quantity should fail");
+
+    /* Valid quantity */
+    zassert_equal(nmbs_z_shell_parse_quantity(sh, "64", CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS, &qty),
+                  0, "Max quantity failed");
+    zassert_equal(qty, 64, "Quantity mismatch");
+
+    /* Out of bounds (> MAX_DATA_WORDS) */
+    zassert_equal(nmbs_z_shell_parse_quantity(sh, "65", CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS, &qty),
+                  -EINVAL, "Quantity > MAX_DATA_WORDS should fail");
+}
+
+ZTEST(nanomodbus_shell, test_shell_parser_boolean_variants)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    bool val = false;
+
+    /* Truthy variants */
+    const char *truthy[] = {"1", "on", "ON", "true", "TRUE", "high", "HIGH"};
+    for (int i = 0; i < ARRAY_SIZE(truthy); i++) {
+        zassert_equal(nmbs_z_shell_parse_bool(sh, truthy[i], "coil", &val), 0, "Truthy %s failed", truthy[i]);
+        zassert_true(val, "Truthy %s not true", truthy[i]);
+    }
+
+    /* Falsy variants */
+    const char *falsy[] = {"0", "off", "OFF", "false", "FALSE", "low", "LOW"};
+    for (int i = 0; i < ARRAY_SIZE(falsy); i++) {
+        zassert_equal(nmbs_z_shell_parse_bool(sh, falsy[i], "coil", &val), 0, "Falsy %s failed", falsy[i]);
+        zassert_false(val, "Falsy %s not false", falsy[i]);
+    }
+
+    /* Invalid boolean */
+    zassert_equal(nmbs_z_shell_parse_bool(sh, "maybe", "coil", &val), -EINVAL, "Invalid boolean accepted");
+}
+
+ZTEST(nanomodbus_shell, test_shell_parser_options)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    struct nmbs_z_cli_options opts;
+
+    char *argv[] = {"cmd", "-c", "my_client", "-u", "5", "-t", "250", "100", "20"};
+    int ret = nmbs_z_shell_parse_options(sh, ARRAY_SIZE(argv), argv, &opts);
+    zassert_equal(ret, 0, "Failed to parse options");
+    zassert_str_equal(opts.client_name, "my_client", "Client name mismatch");
+    zassert_true(opts.unit_id_specified, "unit_id_specified should be true");
+    zassert_equal(opts.unit_id, 5, "Unit ID mismatch");
+    zassert_equal(opts.timeout_ms, 250, "Timeout mismatch");
+    zassert_equal(opts.positional_count, 2, "Positional count mismatch");
+    zassert_str_equal(argv[opts.positional_idx[0]], "100", "Arg 0 mismatch");
+    zassert_str_equal(argv[opts.positional_idx[1]], "20", "Arg 1 mismatch");
+
+    char *bad_argv[] = {"cmd", "-unknown"};
+    zassert_equal(nmbs_z_shell_parse_options(sh, ARRAY_SIZE(bad_argv), bad_argv, &opts), -EINVAL, "Unknown option should fail");
+}
+
+

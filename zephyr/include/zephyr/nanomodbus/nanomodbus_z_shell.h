@@ -162,6 +162,26 @@ int nmbs_z_shell_register_server_tcp(const char *name, nmbs_z_server_tcp_t *serv
 
 #endif /* CONFIG_NANOMODBUS_SHELL_SERVER */
 
+struct shell;
+
+/**
+ * @brief Command line parsed options and positional argument tracking.
+ */
+struct nmbs_z_cli_options {
+	const char *client_name;
+	const char *server_name;
+	uint8_t unit_id;
+	bool unit_id_specified;
+	int32_t timeout_ms;
+	size_t positional_idx[8];
+	size_t positional_count;
+};
+
+int nmbs_z_shell_parse_options(const struct shell *sh, size_t argc, char **argv, struct nmbs_z_cli_options *opts);
+int nmbs_z_shell_parse_u16(const struct shell *sh, const char *str, const char *param_name, uint16_t *val_out);
+int nmbs_z_shell_parse_bool(const struct shell *sh, const char *str, const char *param_name, bool *val_out);
+int nmbs_z_shell_parse_quantity(const struct shell *sh, const char *str, uint16_t max_qty, uint16_t *qty_out);
+
 #ifdef __cplusplus
 }
 #endif
