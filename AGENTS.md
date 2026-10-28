@@ -14,9 +14,10 @@ module. Work happens on `feature/zephyr-module`.
   - `nanomodbus_z_server_tcp.c`: Active Object TCP server (dedicated `k_thread`).
   - `nanomodbus_z_transport_serial.c`: UART transport (RS-485 DE pin control, t1.5/t3.5 frame timings).
   - `nanomodbus_z_transport_tcp.c`: TCP transport (Zephyr BSD sockets API).
+  - `nanomodbus_z_shell.c`: Zephyr Shell CLI commands, static instance registry, radix parser, and table formatting.
   - `nanomodbus_z_common.c`: POSIX error code mapping (`nmbs_error_to_errno`, `errno_to_nmbs_error`).
-- Public headers: `zephyr/include/zephyr/nanomodbus/nanomodbus_z{,_serial,_tcp}.h`,
-  included as `<zephyr/nanomodbus/nanomodbus_z.h>`, etc.
+- Public headers: `zephyr/include/zephyr/nanomodbus/nanomodbus_z{,_serial,_tcp,_shell}.h`,
+  included as `<zephyr/nanomodbus/nanomodbus_z.h>`, `<zephyr/nanomodbus/nanomodbus_z_shell.h>`, etc.
 - `zephyr/Kconfig` defines the feature tree; root `Kconfig` only `rsource`s it.
   `zephyr/module.yml` registers the module.
 - Zephyr apps are in `samples/` (`server_rtu`, `client_rtu`, `client_tcp`, `server_tcp`, `modbus_gateway`).
@@ -100,7 +101,32 @@ west twister -T tests/zephyr -p native_sim --extra-args ZEPHYR_MODULES=$PWD
   - `nanomodbus_serial`
   - `nanomodbus_server_rtu`
   - `nanomodbus_server_tcp`
+  - `nanomodbus_shell`
   Suite names differ from source file names; verify with `-list`.
+
+## Shell CLI Integration
+
+nanoMODBUS provides an interactive Zephyr Shell CLI (`nmbs`) supporting client
+request execution, server diagnostics, and instance enumeration without dynamic memory allocation:
+
+- **Kconfig:** `CONFIG_NANOMODBUS_SHELL=y` enables the subsystem (`CONFIG_NANOMODBUS_SHELL_CLIENT`, `CONFIG_NANOMODBUS_SHELL_SERVER`, `MAX_CLIENTS`, `MAX_SERVERS`, `MAX_DATA_WORDS`).
+- **Registration APIs (`<zephyr/nanomodbus/nanomodbus_z_shell.h>`):**
+  - `nmbs_z_shell_register_client("rtu0", &client)`
+  - `nmbs_z_shell_register_server_rtu("srv0", &server)`
+  - `nmbs_z_shell_register_server_tcp("tcp0", &server)`
+  - `nmbs_z_shell_register_server("name", ctx, diag_cb)`
+- **Commands:**
+  - `nmbs list`: enumerate all registered client and server instances.
+  - `nmbs read-holding [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>` (FC 03)
+  - `nmbs read-input [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>` (FC 04)
+  - `nmbs read-coils [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>` (FC 01)
+  - `nmbs read-discrete [-c <client>] [-u <unit>] [-t <ms>] <addr> <qty>` (FC 02)
+  - `nmbs write-coil [-c <client>] [-u <unit>] [-t <ms>] <addr> <on|off|1|0>` (FC 05)
+  - `nmbs write-register [-c <client>] [-u <unit>] [-t <ms>] <addr> <val>` (FC 06)
+  - `nmbs write-coils [-c <client>] [-u <unit>] [-t <ms>] <addr> <val0> [val1...]` (FC 15)
+  - `nmbs write-registers [-c <client>] [-u <unit>] [-t <ms>] <addr> <val0> [val1...]` (FC 16)
+  - `nmbs status [-s <server>]`: display server operational metrics and error counters.
+  - `nmbs reset-stats [-s <server>]`: reset server diagnostic statistics counters to 0.
 
 ## Gotchas
 

@@ -148,18 +148,26 @@ typedef struct nmbs_z_serial_transport {
         DT_PROP_OR(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id), current_speed, 115200))
 
 #define _NMBS_Z_DT_DE_GPIO(node_id) \
-    COND_CODE_1(DT_NODE_HAS_PROP(node_id, de_gpios), \
-        (GPIO_DT_SPEC_GET(node_id, de_gpios)), \
-        (COND_CODE_1(DT_HAS_ALIAS(modbus_de), \
-            (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_de), gpios, {0})), \
-            ({0}))))
+    COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), \
+        (GPIO_DT_SPEC_GET_OR(node_id, de_gpios, {0})), \
+        (COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), \
+            (GPIO_DT_SPEC_GET_OR(node_id, de_gpios, {0})), \
+            (COND_CODE_1(DT_NODE_HAS_PROP(node_id, de_gpios), \
+                (GPIO_DT_SPEC_GET(node_id, de_gpios)), \
+                (COND_CODE_1(DT_HAS_ALIAS(modbus_de), \
+                    (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_de), gpios, {0})), \
+                    ({0}))))))))
 
 #define _NMBS_Z_DT_RE_GPIO(node_id) \
-    COND_CODE_1(DT_NODE_HAS_PROP(node_id, re_gpios), \
-        (GPIO_DT_SPEC_GET(node_id, re_gpios)), \
-        (COND_CODE_1(DT_HAS_ALIAS(modbus_re), \
-            (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_re), gpios, {0})), \
-            ({0}))))
+    COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), \
+        (GPIO_DT_SPEC_GET_OR(node_id, re_gpios, {0})), \
+        (COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), \
+            (GPIO_DT_SPEC_GET_OR(node_id, re_gpios, {0})), \
+            (COND_CODE_1(DT_NODE_HAS_PROP(node_id, re_gpios), \
+                (GPIO_DT_SPEC_GET(node_id, re_gpios)), \
+                (COND_CODE_1(DT_HAS_ALIAS(modbus_re), \
+                    (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_re), gpios, {0})), \
+                    ({0}))))))))
 
 #define _NMBS_Z_DT_DE_PRE_DELAY(node_id) \
     DT_PROP_OR(node_id, de_pre_delay_us, 0)

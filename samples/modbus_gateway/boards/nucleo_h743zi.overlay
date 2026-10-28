@@ -7,6 +7,8 @@
 	aliases {
 		modbus-bus1 = &usart2;
 		modbus-bus2 = &uart4;
+		modbus0 = &modbus0;
+		modbus1 = &modbus1;
 	};
 };
 
@@ -15,6 +17,19 @@
 	pinctrl-names = "default";
 	current-speed = <115200>;
 	status = "okay";
+
+	modbus0: modbus0 {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		de-mode = "none";
+		rx-mode = "irq";
+
+		bus1_slave: slave@1 {
+			reg = <1>;
+		};
+	};
 };
 
 &uart4 {
@@ -22,6 +37,19 @@
 	pinctrl-names = "default";
 	current-speed = <115200>;
 	status = "okay";
+
+	modbus1: modbus1 {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		de-mode = "none";
+		rx-mode = "irq";
+
+		bus2_slave: slave@2 {
+			reg = <2>;
+		};
+	};
 };
 
 &mac {

@@ -283,11 +283,23 @@ int nmbs_z_shell_parse_u16(const struct shell *sh, const char *str, const char *
 		return -EINVAL;
 	}
 
+	const char *p = str;
+	while (*p == ' ' || *p == '\t') {
+		p++;
+	}
+
+	if (*p == '\0' || *p == '-') {
+		if (sh) {
+			shell_error(sh, "Invalid number format for %s: '%s'", param_name, str);
+		}
+		return -EINVAL;
+	}
+
 	char *endptr = NULL;
 	errno = 0;
-	unsigned long parsed = strtoul(str, &endptr, 0);
+	unsigned long parsed = strtoul(p, &endptr, 0);
 
-	if (*str == '\0' || *endptr != '\0' || errno == ERANGE) {
+	if (*endptr != '\0' || errno == ERANGE) {
 		if (sh) {
 			shell_error(sh, "Invalid number format for %s: '%s'", param_name, str);
 		}
@@ -479,28 +491,31 @@ static void format_coils_bitfield(const struct shell *sh, uint16_t start_addr, c
 	}
 }
 
-static struct client_entry *resolve_client(const struct shell *sh, const struct nmbs_z_cli_options *opts)
+static int resolve_client(const struct shell *sh, const struct nmbs_z_cli_options *opts,
+			  struct client_entry **entry_out)
 {
 	if (opts->client_name) {
 		struct client_entry *entry = nmbs_z_shell_find_client(opts->client_name);
 		if (!entry) {
 			shell_error(sh, "Client '%s' not found. Run 'nmbs list'", opts->client_name);
-			return NULL;
+			return -ENOENT;
 		}
-		return entry;
+		*entry_out = entry;
+		return 0;
 	}
 
 	if (s_client_count == 0) {
 		shell_error(sh, "No Modbus client registered.");
-		return NULL;
+		return -ENODEV;
 	}
 
 	if (s_client_count > 1) {
 		shell_error(sh, "Multiple clients registered. Specify target with -c <client_name>.");
-		return NULL;
+		return -EINVAL;
 	}
 
-	return &s_clients[0];
+	*entry_out = &s_clients[0];
+	return 0;
 }
 
 static int report_client_error(const struct shell *sh, nmbs_z_client_t *client, int ret)
@@ -530,9 +545,10 @@ static int cmd_nmbs_read_holding(const struct shell *sh, size_t argc, char **arg
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -548,13 +564,30 @@ static int cmd_nmbs_read_holding(const struct shell *sh, size_t argc, char **arg
 	}
 
 	uint16_t data[CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS];
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_read_holding_registers_addr(entry->client, opts.unit_id, addr, qty, data, timeout);
 	} else {
 		ret = nmbs_z_client_read_holding_registers(entry->client, addr, qty, data, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -577,9 +610,10 @@ static int cmd_nmbs_read_input(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -595,13 +629,30 @@ static int cmd_nmbs_read_input(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	uint16_t data[CONFIG_NANOMODBUS_SHELL_MAX_DATA_WORDS];
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_read_input_registers_addr(entry->client, opts.unit_id, addr, qty, data, timeout);
 	} else {
 		ret = nmbs_z_client_read_input_registers(entry->client, addr, qty, data, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -624,9 +675,10 @@ static int cmd_nmbs_read_coils(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -647,13 +699,30 @@ static int cmd_nmbs_read_coils(const struct shell *sh, size_t argc, char **argv)
 
 	nmbs_bitfield coils;
 	memset(coils, 0, sizeof(coils));
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_read_coils_addr(entry->client, opts.unit_id, addr, qty, coils, timeout);
 	} else {
 		ret = nmbs_z_client_read_coils(entry->client, addr, qty, coils, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -676,9 +745,10 @@ static int cmd_nmbs_read_discrete(const struct shell *sh, size_t argc, char **ar
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -699,13 +769,30 @@ static int cmd_nmbs_read_discrete(const struct shell *sh, size_t argc, char **ar
 
 	nmbs_bitfield inputs;
 	memset(inputs, 0, sizeof(inputs));
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_read_discrete_inputs_addr(entry->client, opts.unit_id, addr, qty, inputs, timeout);
 	} else {
 		ret = nmbs_z_client_read_discrete_inputs(entry->client, addr, qty, inputs, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -728,9 +815,10 @@ static int cmd_nmbs_write_coil(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -745,13 +833,30 @@ static int cmd_nmbs_write_coil(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_write_single_coil_addr(entry->client, opts.unit_id, addr, val, timeout);
 	} else {
 		ret = nmbs_z_client_write_single_coil(entry->client, addr, val, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -779,9 +884,10 @@ static int cmd_nmbs_write_register(const struct shell *sh, size_t argc, char **a
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -796,13 +902,30 @@ static int cmd_nmbs_write_register(const struct shell *sh, size_t argc, char **a
 		return ret;
 	}
 
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_write_single_register_addr(entry->client, opts.unit_id, addr, val, timeout);
 	} else {
 		ret = nmbs_z_client_write_single_register(entry->client, addr, val, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -830,9 +953,10 @@ static int cmd_nmbs_write_coils(const struct shell *sh, size_t argc, char **argv
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -863,13 +987,30 @@ static int cmd_nmbs_write_coils(const struct shell *sh, size_t argc, char **argv
 		nmbs_bitfield_write(coils, i, b);
 	}
 
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_write_multiple_coils_addr(entry->client, opts.unit_id, addr, qty, coils, timeout);
 	} else {
 		ret = nmbs_z_client_write_multiple_coils(entry->client, addr, qty, coils, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -897,9 +1038,10 @@ static int cmd_nmbs_write_registers(const struct shell *sh, size_t argc, char **
 		return -EINVAL;
 	}
 
-	struct client_entry *entry = resolve_client(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct client_entry *entry = NULL;
+	ret = resolve_client(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	uint16_t addr = 0;
@@ -923,13 +1065,30 @@ static int cmd_nmbs_write_registers(const struct shell *sh, size_t argc, char **
 		}
 	}
 
-	k_timeout_t timeout = (opts.timeout_ms >= 0) ? K_MSEC(opts.timeout_ms) : K_MSEC(1000);
+	int32_t effective_timeout_ms = (opts.timeout_ms >= 0)
+		? opts.timeout_ms
+		: ((entry->client->read_timeout_ms > 0) ? entry->client->read_timeout_ms : 1000);
+	k_timeout_t timeout = K_MSEC(effective_timeout_ms);
+
+	if (k_mutex_lock(&entry->client->lock, timeout) != 0) {
+		shell_error(sh, "Client busy: Lock timeout expired");
+		return -EBUSY;
+	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, opts.timeout_ms);
+	}
 
 	if (opts.unit_id_specified) {
 		ret = nmbs_z_client_write_multiple_registers_addr(entry->client, opts.unit_id, addr, qty, data, timeout);
 	} else {
 		ret = nmbs_z_client_write_multiple_registers(entry->client, addr, qty, data, timeout);
 	}
+
+	if (opts.timeout_ms >= 0) {
+		nmbs_set_read_timeout(&entry->client->core, entry->client->read_timeout_ms);
+	}
+	k_mutex_unlock(&entry->client->lock);
 
 	if (ret < 0) {
 		return report_client_error(sh, entry->client, ret);
@@ -948,28 +1107,31 @@ static int cmd_nmbs_write_registers(const struct shell *sh, size_t argc, char **
 
 #ifdef CONFIG_NANOMODBUS_SHELL_SERVER
 
-static struct server_entry *resolve_server(const struct shell *sh, const struct nmbs_z_cli_options *opts)
+static int resolve_server(const struct shell *sh, const struct nmbs_z_cli_options *opts,
+			  struct server_entry **entry_out)
 {
 	if (opts->server_name) {
 		struct server_entry *entry = nmbs_z_shell_find_server(opts->server_name);
 		if (!entry) {
 			shell_error(sh, "Server '%s' not found. Run 'nmbs list'", opts->server_name);
-			return NULL;
+			return -ENOENT;
 		}
-		return entry;
+		*entry_out = entry;
+		return 0;
 	}
 
 	if (s_server_count == 0) {
 		shell_error(sh, "No Modbus server registered.");
-		return NULL;
+		return -ENODEV;
 	}
 
 	if (s_server_count > 1) {
 		shell_error(sh, "Multiple servers registered. Specify target with -s <server_name>.");
-		return NULL;
+		return -EINVAL;
 	}
 
-	return &s_servers[0];
+	*entry_out = &s_servers[0];
+	return 0;
 }
 
 static int cmd_nmbs_status(const struct shell *sh, size_t argc, char **argv)
@@ -980,9 +1142,10 @@ static int cmd_nmbs_status(const struct shell *sh, size_t argc, char **argv)
 		return ret;
 	}
 
-	struct server_entry *entry = resolve_server(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct server_entry *entry = NULL;
+	ret = resolve_server(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	struct nmbs_z_server_info info;
@@ -1030,9 +1193,10 @@ static int cmd_nmbs_reset_stats(const struct shell *sh, size_t argc, char **argv
 		return ret;
 	}
 
-	struct server_entry *entry = resolve_server(sh, &opts);
-	if (!entry) {
-		return -ENODEV;
+	struct server_entry *entry = NULL;
+	ret = resolve_server(sh, &opts, &entry);
+	if (ret != 0) {
+		return ret;
 	}
 
 	struct nmbs_z_server_info info;

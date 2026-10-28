@@ -190,6 +190,7 @@ ZTEST(nanomodbus_serial, test_dt_config_auto_and_defaults) {
     zassert_equal(cfg.de_mode, NMBS_Z_SERIAL_DE_AUTO, "DE mode must default to AUTO");
     zassert_equal(cfg.de_pre_delay_us, 0, "Default DE pre delay must be 0");
     zassert_equal(cfg.de_post_delay_us, 0, "Default DE post delay must be 0");
+    zassert_is_null(cfg.de_gpio.port, "DE GPIO port must be NULL when not configured");
     zassert_is_null(cfg.re_gpio.port, "RE GPIO port must be NULL when not configured");
 }
 
@@ -304,11 +305,61 @@ ZTEST(nanomodbus_serial, test_rs485_hw_de_ignores_re_gpio) {
     };
     nmbs_platform_conf p_conf;
 
-    /* Since mock_re_uart does not report RS485 flow control, DE_HARDWARE returns -ENOTSUP */
+    /* 1. Since mock_re_uart does not report RS485 flow control, DE_HARDWARE returns -ENOTSUP */
     int ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
     zassert_equal(ret, -ENOTSUP, "Init with DE_HARDWARE on non-RS485 UART returns -ENOTSUP");
     zassert_false(transport.re_gpio, "transport.re_gpio must remain false");
     zassert_false(transport.de_gpio, "transport.de_gpio must remain false");
+
+    /* 2. Pure DE_HARDWARE with UART reporting UART_CFG_FLOW_CTRL_RS485:
+     * neither de_gpio nor re_gpio is touched.
+     */
+    reset_mock_re_tracker();
+    mock_re_tracker.uart_cfg.flow_ctrl = UART_CFG_FLOW_CTRL_RS485;
+    mock_re_tracker.de_val = -1;
+    mock_re_tracker.re_val = -1;
+
+    ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
+    zassert_equal(ret, 0, "Init with DE_HARDWARE on RS485 UART must succeed");
+    zassert_true(transport.de_hw, "transport.de_hw must be true");
+    zassert_false(transport.de_gpio, "transport.de_gpio must be false in pure DE_HARDWARE");
+    zassert_false(transport.re_gpio, "transport.re_gpio must be false in pure DE_HARDWARE");
+    zassert_equal(mock_re_tracker.de_val, -1, "DE GPIO must not be configured in DE_HARDWARE");
+    zassert_equal(mock_re_tracker.re_val, -1, "RE GPIO must not be configured in DE_HARDWARE");
+
+    uint8_t payload[] = {0x01, 0x03};
+    int32_t written = p_conf.write(payload, sizeof(payload), 1000, &transport);
+    zassert_equal(written, sizeof(payload), "Write must succeed");
+    zassert_equal(mock_re_tracker.de_set_count, 0, "DE GPIO must not be toggled in DE_HARDWARE");
+    zassert_equal(mock_re_tracker.re_set_count, 0, "RE GPIO must not be toggled in DE_HARDWARE");
+    nmbs_z_serial_transport_deinit(&transport);
+
+    /* 3. Hybrid DE_AUTO with UART reporting UART_CFG_FLOW_CTRL_RS485 and re_gpio provided:
+     * de_hw == true, de_gpio == false, re_gpio == true, and re_gpio toggles during write.
+     */
+    reset_mock_re_tracker();
+    mock_re_tracker.uart_cfg.flow_ctrl = UART_CFG_FLOW_CTRL_RS485;
+    mock_re_tracker.de_val = -1;
+    mock_re_tracker.re_val = -1;
+    cfg.de_mode = NMBS_Z_SERIAL_DE_AUTO;
+    cfg.de_pre_delay_us = 10;
+    cfg.de_post_delay_us = 10;
+
+    ret = nmbs_z_serial_transport_init(&transport, &cfg, &p_conf);
+    zassert_equal(ret, 0, "Init with DE_AUTO on RS485 UART must succeed");
+    zassert_true(transport.de_hw, "transport.de_hw must be true in hybrid DE_AUTO");
+    zassert_false(transport.de_gpio, "transport.de_gpio must be false in hybrid DE_AUTO");
+    zassert_true(transport.re_gpio, "transport.re_gpio must be true in hybrid DE_AUTO");
+    zassert_equal(mock_re_tracker.de_val, -1, "DE GPIO must not be configured in hybrid DE_AUTO");
+    zassert_equal(mock_re_tracker.re_val, 1, "RE GPIO must be configured ACTIVE in hybrid DE_AUTO");
+
+    written = p_conf.write(payload, sizeof(payload), 1000, &transport);
+    zassert_equal(written, sizeof(payload), "Write must succeed");
+    zassert_equal(mock_re_tracker.de_set_count, 0, "DE GPIO must not be toggled in hybrid DE_AUTO");
+    zassert_true(mock_re_tracker.re_disabled_during_tx, "RE GPIO must be disabled (0) during TX in hybrid DE_AUTO");
+    zassert_equal(mock_re_tracker.re_val, 1, "RE GPIO must be restored to 1 after TX in hybrid DE_AUTO");
+    zassert_equal(mock_re_tracker.re_set_count, 2, "RE GPIO must be toggled twice during write");
+    nmbs_z_serial_transport_deinit(&transport);
 }
 
 ZTEST(nanomodbus_serial, test_serial_transport_reconfigure) {

@@ -20,6 +20,9 @@
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
 #include <zephyr/nanomodbus/nanomodbus_z_tcp.h>
+#ifdef CONFIG_NANOMODBUS_SHELL
+#include <zephyr/nanomodbus/nanomodbus_z_shell.h>
+#endif
 
 LOG_MODULE_REGISTER(modbus_gateway, CONFIG_NANOMODBUS_LOG_LEVEL);
 
@@ -55,20 +58,36 @@ static K_THREAD_STACK_DEFINE(bus2_stack, 2048);
 static struct k_thread bus1_thread;
 static struct k_thread bus2_thread;
 
-/* UART peripherals come from the devicetree aliases provided by the board
+/* UART peripherals come from the devicetree nodes/aliases provided by the board
  * overlay. There is deliberately no fallback to the console UART: taking it
  * over would silently kill logging on boards without the aliases.
  */
-#if DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(modbus_bus1))
-#define BUS1_UART_NODE DT_ALIAS(modbus_bus1)
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(modbus0))
+#define BUS1_NODE DT_NODELABEL(modbus0)
+#elif DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(modbus_bus1))
+#define BUS1_NODE DT_ALIAS(modbus_bus1)
 #else
-#define BUS1_UART_NODE DT_INVALID_NODE
+#define BUS1_NODE DT_INVALID_NODE
 #endif
 
-#if DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(modbus_bus2))
-#define BUS2_UART_NODE DT_ALIAS(modbus_bus2)
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(modbus1))
+#define BUS2_NODE DT_NODELABEL(modbus1)
+#elif DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(modbus_bus2))
+#define BUS2_NODE DT_ALIAS(modbus_bus2)
 #else
-#define BUS2_UART_NODE DT_INVALID_NODE
+#define BUS2_NODE DT_INVALID_NODE
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(bus1_slave))
+#define BUS1_SLAVE_ADDR NMBS_Z_DT_SLAVE_ID(DT_NODELABEL(bus1_slave))
+#else
+#define BUS1_SLAVE_ADDR 1
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(bus2_slave))
+#define BUS2_SLAVE_ADDR NMBS_Z_DT_SLAVE_ID(DT_NODELABEL(bus2_slave))
+#else
+#define BUS2_SLAVE_ADDR 2
 #endif
 
 /* Modbus TCP Server Callbacks serving cached RTU registers */
@@ -123,22 +142,16 @@ static const nmbs_callbacks gateway_callbacks = {
  * false means the caller should publish simulated values instead.
  */
 static bool setup_rtu_bus(nmbs_z_client_t *client, nmbs_z_serial_transport_t *transport,
-                          nmbs_platform_conf *platform, const struct device *uart_dev,
+                          nmbs_platform_conf *platform,
+                          const nmbs_z_serial_transport_config_t *config,
                           uint8_t address, const char *name)
 {
-    if (uart_dev == NULL || !device_is_ready(uart_dev)) {
+    if (config == NULL || config->uart_dev == NULL || !device_is_ready(config->uart_dev)) {
         LOG_WRN("%s: UART not available, publishing simulated values", name);
         return false;
     }
 
-    nmbs_z_serial_transport_config_t config = {
-        .uart_dev = uart_dev,
-        .baud_rate = 115200,
-        .de_mode = NMBS_Z_SERIAL_DE_NONE,
-        .rx_mode = NMBS_Z_SERIAL_RX_IRQ,
-    };
-
-    int ret = nmbs_z_serial_transport_init(transport, &config, platform);
+    int ret = nmbs_z_serial_transport_init(transport, config, platform);
     if (ret != 0) {
         LOG_ERR("%s: serial transport init failed: %d", name, ret);
         return false;
@@ -266,20 +279,32 @@ int main(void)
     }
 
     /* 1. Configure and initialize RTU Client 1 (Bus 1) */
-    const struct device *uart1_dev = NULL;
-#if DT_NODE_HAS_STATUS_OKAY(BUS1_UART_NODE)
-    uart1_dev = DEVICE_DT_GET(BUS1_UART_NODE);
+#if DT_NODE_EXISTS(BUS1_NODE)
+    nmbs_z_serial_transport_config_t bus1_cfg = NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(BUS1_NODE);
+#else
+    nmbs_z_serial_transport_config_t bus1_cfg = {0};
 #endif
-    bus1_hw_ready = setup_rtu_bus(&client_rtu1, &transport_rtu1, &platform_rtu1, uart1_dev, 1,
-                                  "RTU Bus 1");
+    bus1_hw_ready = setup_rtu_bus(&client_rtu1, &transport_rtu1, &platform_rtu1, &bus1_cfg,
+                                  BUS1_SLAVE_ADDR, "RTU Bus 1");
+#ifdef CONFIG_NANOMODBUS_SHELL
+    if (bus1_hw_ready) {
+        (void)nmbs_z_shell_register_client("rtu1", &client_rtu1);
+    }
+#endif
 
     /* 2. Configure and initialize RTU Client 2 (Bus 2) */
-    const struct device *uart2_dev = NULL;
-#if DT_NODE_HAS_STATUS_OKAY(BUS2_UART_NODE)
-    uart2_dev = DEVICE_DT_GET(BUS2_UART_NODE);
+#if DT_NODE_EXISTS(BUS2_NODE)
+    nmbs_z_serial_transport_config_t bus2_cfg = NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(BUS2_NODE);
+#else
+    nmbs_z_serial_transport_config_t bus2_cfg = {0};
 #endif
-    bus2_hw_ready = setup_rtu_bus(&client_rtu2, &transport_rtu2, &platform_rtu2, uart2_dev, 2,
-                                  "RTU Bus 2");
+    bus2_hw_ready = setup_rtu_bus(&client_rtu2, &transport_rtu2, &platform_rtu2, &bus2_cfg,
+                                  BUS2_SLAVE_ADDR, "RTU Bus 2");
+#ifdef CONFIG_NANOMODBUS_SHELL
+    if (bus2_hw_ready) {
+        (void)nmbs_z_shell_register_client("rtu2", &client_rtu2);
+    }
+#endif
 
     /* 3. Start Modbus TCP Server serving cached registers */
     int ret = nmbs_z_server_tcp_start(&tcp_server, &gateway_callbacks, GATEWAY_TCP_PORT);
@@ -287,6 +312,9 @@ int main(void)
         LOG_ERR("Failed to start Gateway TCP Server on port %u: %d", GATEWAY_TCP_PORT, ret);
         return ret;
     }
+#ifdef CONFIG_NANOMODBUS_SHELL
+    (void)nmbs_z_shell_register_server_tcp("tcp0", &tcp_server);
+#endif
     LOG_INF("Gateway Modbus TCP Server listening on port %u", GATEWAY_TCP_PORT);
 
     /* 4. Launch polling threads for Bus 1 and Bus 2 */

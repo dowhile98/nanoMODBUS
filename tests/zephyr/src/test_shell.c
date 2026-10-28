@@ -132,6 +132,9 @@ ZTEST(nanomodbus_shell, test_shell_parser_malformed_radix)
     /* Trailing garbage */
     zassert_equal(nmbs_z_shell_parse_u16(sh, "123abc", "addr", &val), -EINVAL, "Expected -EINVAL for trailing text");
 
+    /* Negative number */
+    zassert_equal(nmbs_z_shell_parse_u16(sh, "-1", "addr", &val), -EINVAL, "Expected -EINVAL for negative number");
+
     /* Numerical overflow (> 65535) */
     zassert_equal(nmbs_z_shell_parse_u16(sh, "70000", "addr", &val), -ERANGE, "Expected -ERANGE on overflow");
 }

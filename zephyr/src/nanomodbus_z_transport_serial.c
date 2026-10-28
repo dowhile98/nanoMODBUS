@@ -144,28 +144,29 @@ static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
 
     transport->de_hw = hw_de;
     transport->de_gpio = gpio_de;
+    transport->re_gpio = false;
 
     if (hw_de) {
         LOG_DBG("Using UART hardware RS-485 driver-enable");
-    } else {
-        if (gpio_de) {
-            LOG_DBG("Using GPIO RS-485 driver-enable");
-        }
-        if (config->re_gpio.port != NULL) {
-            if (!device_is_ready(config->re_gpio.port)) {
-                LOG_ERR("RS-485 RE GPIO port not ready");
-                return -ENODEV;
-            }
+    } else if (gpio_de) {
+        LOG_DBG("Using GPIO RS-485 driver-enable");
+    }
 
-            int ret = gpio_pin_configure_dt(&config->re_gpio, GPIO_OUTPUT_ACTIVE);
-            if (ret < 0) {
-                LOG_ERR("Failed to configure RS-485 RE pin (%d)", ret);
-                return ret;
-            }
-
-            transport->re_gpio = true;
-            LOG_DBG("Using GPIO RS-485 receiver-enable");
+    if ((config->de_mode == NMBS_Z_SERIAL_DE_AUTO || config->de_mode == NMBS_Z_SERIAL_DE_GPIO) &&
+        config->re_gpio.port != NULL) {
+        if (!device_is_ready(config->re_gpio.port)) {
+            LOG_ERR("RS-485 RE GPIO port not ready");
+            return -ENODEV;
         }
+
+        int ret = gpio_pin_configure_dt(&config->re_gpio, GPIO_OUTPUT_ACTIVE);
+        if (ret < 0) {
+            LOG_ERR("Failed to configure RS-485 RE pin (%d)", ret);
+            return ret;
+        }
+
+        transport->re_gpio = true;
+        LOG_DBG("Using GPIO RS-485 receiver-enable");
     }
 
     return 0;
@@ -551,9 +552,10 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
 
     if (gpio_de) {
         gpio_pin_set_dt(&transport->cfg.de_gpio, 1);
-        if (transport->cfg.de_pre_delay_us > 0) {
-            k_busy_wait(transport->cfg.de_pre_delay_us);
-        }
+    }
+
+    if ((gpio_de || gpio_re) && transport->cfg.de_pre_delay_us > 0) {
+        k_busy_wait(transport->cfg.de_pre_delay_us);
     }
 
     /* 2. Push all bytes to UART */
@@ -582,10 +584,11 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
         }
     }
 
+    if ((gpio_de || gpio_re) && transport->cfg.de_post_delay_us > 0) {
+        k_busy_wait(transport->cfg.de_post_delay_us);
+    }
+
     if (gpio_de) {
-        if (transport->cfg.de_post_delay_us > 0) {
-            k_busy_wait(transport->cfg.de_post_delay_us);
-        }
         gpio_pin_set_dt(&transport->cfg.de_gpio, 0);
     }
 
