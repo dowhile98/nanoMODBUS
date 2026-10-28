@@ -10,6 +10,9 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
+#ifdef CONFIG_NANOMODBUS_SHELL
+#include <zephyr/nanomodbus/nanomodbus_z_shell.h>
+#endif
 
 LOG_MODULE_REGISTER(server_rtu_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 
@@ -178,6 +181,15 @@ int main(void)
         LOG_ERR("Failed to initialize RTU Server: %d", ret);
         return ret;
     }
+
+#ifdef CONFIG_NANOMODBUS_SHELL
+    ret = nmbs_z_shell_register_server_rtu("srv0", &server);
+    if (ret != 0) {
+        LOG_WRN("Failed to register server with shell: %d", ret);
+    } else {
+        LOG_INF("Registered server 'srv0' with shell CLI");
+    }
+#endif
 
     ret = nmbs_z_server_rtu_start(&server);
     if (ret != 0) {

@@ -18,6 +18,9 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/nanomodbus/nanomodbus_z.h>
 #include <zephyr/nanomodbus/nanomodbus_z_serial.h>
+#ifdef CONFIG_NANOMODBUS_SHELL
+#include <zephyr/nanomodbus/nanomodbus_z_shell.h>
+#endif
 
 LOG_MODULE_REGISTER(client_rtu_app, CONFIG_NANOMODBUS_LOG_LEVEL);
 
@@ -91,6 +94,15 @@ int main(void)
         LOG_ERR("Failed to initialize Modbus client: %d", ret);
         return ret;
     }
+
+#ifdef CONFIG_NANOMODBUS_SHELL
+    ret = nmbs_z_shell_register_client("rtu0", &client);
+    if (ret != 0) {
+        LOG_WRN("Failed to register client with shell: %d", ret);
+    } else {
+        LOG_INF("Registered client 'rtu0' with shell CLI");
+    }
+#endif
 
     ret = nmbs_z_client_set_target_address(&client, SERVER_ADDRESS, K_MSEC(100));
     if (ret != 0) {
