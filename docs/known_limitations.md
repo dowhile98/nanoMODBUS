@@ -23,6 +23,7 @@ graph TD
         L_PRUNE["6. Client-Side Kconfig Pruning Mismatch<br/>(Upstream Core Ignores Client FC Disabled Macros)"]
         L_DCACHE["7. Asynchronous UART DMA Cache Coherency<br/>(Cortex-M7 / STM32H7 NOCACHE Requirement)"]
         L_RS485["8. RS-485 DE Drain Dependency on IRQ<br/>(Requires CONFIG_UART_INTERRUPT_DRIVEN=y)"]
+        L_BRIDGE["9. t1.5 Resync vs USB-RS485 Bridges<br/>(Fragmented RX Chunks Discard Partial Frames)"]
     end
 ```
 
@@ -141,3 +142,20 @@ graph TD
 - **Mitigation / Workaround**:
   - Always ensure `CONFIG_UART_INTERRUPT_DRIVEN=y` is selected when RS-485 GPIO control is active.
   - Prefer hardware Driver Enable (`NMBS_Z_SERIAL_DE_HARDWARE` via Devicetree `de-enable`), which delegates transceiver timing directly to the UART hardware state machine.
+
+### 5.3 t1.5 Gap Resync Discards Frames Delivered by a USB-RS485 Bridge
+- **Description**: [`nmbs_z_serial_transport_rx_put()`](file:///media/jeffry/jqb/GitHub/nanoMODBUS/zephyr/src/nanomodbus_z_transport_serial.c#L671-L720) resets the RX ring buffer whenever the gap between two RX callbacks exceeds `t1_5_us` and bytes are already buffered:
+  ```c
+  if (elapsed_us > transport->t1_5_us && ring_buf_size_get(&transport->rx_rb) > 0) {
+      ring_buf_reset(&transport->rx_rb);
+      atomic_inc(&transport->rx_resync_count);
+  }
+  ```
+  This implements the Modbus over Serial Line rule that a gap longer than 1.5 characters breaks a frame. The timing budget comes from [`nmbs_z_serial_calc_timings()`](file:///media/jeffry/jqb/GitHub/nanoMODBUS/zephyr/src/nanomodbus_z_transport_serial.c#L15-L34): `16500000 / baud` for baud rates up to 19200 (1718 µs at 9600), and a fixed **750 µs** above 19200, as mandated by the specification.
+- **Hardware Hazard**: The rule assumes RX callbacks are paced by the UART. A USB-RS485 bridge instead delivers received bytes in USB transfers, so one Modbus frame can arrive split across several chunks separated by USB framing intervals. When such an interval exceeds the `t1.5` budget, each new chunk discards the previously buffered bytes and the frame never reaches the protocol core. The budget shrinks with baud while USB framing stays roughly constant, so the exposure is baud-dependent: 750 µs above 19200 versus 1718 µs at 9600.
+- **Observed on the reference bench**: with a CH340/CH341 adapter (`USB2.0-Ser!`) at 115200 the RTU server stayed at `Frames Received: 0` with `Checksum Errors: 0` — no frame was ever assembled — and the RTU client returned `NMBS_ERROR_TIMEOUT` (`-3`). At 9600 the same adapter produced `Checksum Errors` instead, indicating that bytes arrived but still no complete frame. The same firmware and wiring exchanged frames correctly at 115200 once an FTDI FT232H-class adapter was used.
+- **Mitigation / Workaround**:
+  1. *Adapter with a latency timer*: an FTDI FT232H adapter batches a whole frame into one USB transfer, so no intra-frame gap reaches the transport. Repository HIL validation runs at 115200 this way.
+  2. *Lower the baud rate*: the `t1.5` budget grows to 1718 µs at 9600, which leaves room for coarser USB framing. Treat this as a mitigation to verify per adapter, not a guarantee.
+  3. *Native UART*: a real RS-485 port delivers bytes paced by the line, so the resync rule behaves exactly as the specification intends and 115200 is unaffected.
+  - Do not shrink `t1.5` to work around this: the discard is protocol-correct, and the transport cannot distinguish a bridge-induced gap from a genuine line gap.

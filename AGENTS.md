@@ -30,10 +30,19 @@ module. Work happens on `feature/zephyr-module`.
 Target board is `nucleo_h743zi` (STM32H743ZI), not `nucleo_h743`. Each sample
 provides board configurations in `samples/<app>/boards/nucleo_h743zi.overlay` and `.conf`:
 
-- `server_rtu`: `&usart2` (PD5/PD6, 115200) aliased to `modbus-uart`; RS-485 DE pin on `&gpiod 4` aliased to `modbus-de` (or hardware RTS DE via pinctrl). Requires `CONFIG_UART_INTERRUPT_DRIVEN=y`.
-- `client_rtu`: `&usart2` (PD5/PD6, 115200) aliased to `modbus-uart`.
+- `server_rtu`: `&usart2` (PD5/PD6, 115200) aliased to `modbus-uart`; RS-485 RE/DE driven from `&gpiod 4` through `de-gpios` (software DE, active-high; the hardware RTS DE pinctrl is no longer used). Requires `CONFIG_UART_INTERRUPT_DRIVEN=y`.
+- `client_rtu`: `&usart2` (PD5/PD6, 115200) aliased to `modbus-uart`; RS-485 RE/DE on the same `&gpiod 4` `de-gpios`.
 - `client_tcp` / `server_tcp`: Ethernet MAC `&mac` with DHCP (`CONFIG_NET_L2_ETHERNET=y`, `CONFIG_NET_DHCPV4=y`).
 - `modbus_gateway`: Dual UARTs `&usart2` (`modbus-bus1`) and `&uart4` (`modbus-bus2`, PC10/PC11), plus Ethernet `&mac`.
+
+RS-485 bench wiring, validated on hardware for both RTU samples: PD5 → DI,
+PD6 → RO, PD4 → DE with RE tied to DE (high = TX, low = RX), A/B straight
+(A↔A, B↔B) and a common ground. Power the transceiver per its datasheet (a
+genuine MAX485 needs 4.75–5 V; PD6 is 5 V tolerant, so 5 V is safe) and check
+the rating of clone modules. Frames are exchanged at 115200 against an FTDI
+USB-RS485 adapter on `/dev/ttyUSB0` while the shell runs on the ST-LINK VCP
+(`/dev/ttyACM0`, USART3). A CH340/CH341 adapter never completed a frame at
+115200 on this bench; see `docs/known_limitations.md` §5.3.
 
 ## Logging Rules
 
