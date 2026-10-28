@@ -172,22 +172,106 @@ int nmbs_z_shell_unregister_server(const char *name)
 }
 
 #ifdef CONFIG_NANOMODBUS_SERVER_RTU
+static int rtu_server_diag_cb(void *server_ctx, struct nmbs_z_server_info *info, bool reset)
+{
+	nmbs_z_server_rtu_t *server = (nmbs_z_server_rtu_t *)server_ctx;
+
+	if (!server) {
+		return -EINVAL;
+	}
+
+	if (info != NULL) {
+		info->state = atomic_get(&server->running) ? NMBS_Z_SERVER_STATE_RUNNING : NMBS_Z_SERVER_STATE_STOPPED;
+		info->unit_id = server->server_address;
+		info->port = 0;
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+		struct nmbs_z_stats raw_stats;
+		int ret = nmbs_z_server_rtu_get_stats(server, &raw_stats);
+		if (ret == 0) {
+			info->stats.rx_frames = raw_stats.rx_frames;
+			info->stats.tx_frames = raw_stats.tx_frames;
+			info->stats.rx_errors = raw_stats.crc_errors + raw_stats.timeouts;
+			info->stats.exceptions_sent = raw_stats.exceptions;
+			if (raw_stats.rx_frames >= info->stats.rx_errors) {
+				info->stats.requests_handled = raw_stats.rx_frames - info->stats.rx_errors;
+			} else {
+				info->stats.requests_handled = 0;
+			}
+		} else {
+			memset(&info->stats, 0, sizeof(info->stats));
+		}
+#else
+		memset(&info->stats, 0, sizeof(info->stats));
+#endif
+	}
+
+	if (reset) {
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+		(void)nmbs_z_server_rtu_reset_stats(server);
+#endif
+	}
+
+	return 0;
+}
+
 int nmbs_z_shell_register_server_rtu(const char *name, nmbs_z_server_rtu_t *server)
 {
 	if (!name || !server) {
 		return -EINVAL;
 	}
-	return -ENOSYS;
+	return nmbs_z_shell_register_server(name, (void *)server, rtu_server_diag_cb);
 }
 #endif
 
 #ifdef CONFIG_NANOMODBUS_SERVER_TCP
+static int tcp_server_diag_cb(void *server_ctx, struct nmbs_z_server_info *info, bool reset)
+{
+	nmbs_z_server_tcp_t *server = (nmbs_z_server_tcp_t *)server_ctx;
+
+	if (!server) {
+		return -EINVAL;
+	}
+
+	if (info != NULL) {
+		info->state = atomic_get(&server->running) ? NMBS_Z_SERVER_STATE_RUNNING : NMBS_Z_SERVER_STATE_STOPPED;
+		info->unit_id = 0;
+		info->port = server->port;
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+		struct nmbs_z_stats raw_stats;
+		int ret = nmbs_z_server_tcp_get_stats(server, &raw_stats);
+		if (ret == 0) {
+			info->stats.rx_frames = raw_stats.rx_frames;
+			info->stats.tx_frames = raw_stats.tx_frames;
+			info->stats.rx_errors = raw_stats.crc_errors + raw_stats.timeouts;
+			info->stats.exceptions_sent = raw_stats.exceptions;
+			if (raw_stats.rx_frames >= info->stats.rx_errors) {
+				info->stats.requests_handled = raw_stats.rx_frames - info->stats.rx_errors;
+			} else {
+				info->stats.requests_handled = 0;
+			}
+		} else {
+			memset(&info->stats, 0, sizeof(info->stats));
+		}
+#else
+		memset(&info->stats, 0, sizeof(info->stats));
+#endif
+	}
+
+	if (reset) {
+#ifdef CONFIG_NANOMODBUS_DIAGNOSTICS
+		(void)nmbs_z_server_tcp_reset_stats(server);
+#endif
+	}
+
+	return 0;
+}
+
 int nmbs_z_shell_register_server_tcp(const char *name, nmbs_z_server_tcp_t *server)
 {
 	if (!name || !server) {
 		return -EINVAL;
 	}
-	return -ENOSYS;
+	return nmbs_z_shell_register_server(name, (void *)server, tcp_server_diag_cb);
 }
 #endif
 
@@ -862,7 +946,185 @@ static int cmd_nmbs_write_registers(const struct shell *sh, size_t argc, char **
 
 #endif /* CONFIG_NANOMODBUS_SHELL_CLIENT */
 
+#ifdef CONFIG_NANOMODBUS_SHELL_SERVER
+
+static struct server_entry *resolve_server(const struct shell *sh, const struct nmbs_z_cli_options *opts)
+{
+	if (opts->server_name) {
+		struct server_entry *entry = nmbs_z_shell_find_server(opts->server_name);
+		if (!entry) {
+			shell_error(sh, "Server '%s' not found. Run 'nmbs list'", opts->server_name);
+			return NULL;
+		}
+		return entry;
+	}
+
+	if (s_server_count == 0) {
+		shell_error(sh, "No Modbus server registered.");
+		return NULL;
+	}
+
+	if (s_server_count > 1) {
+		shell_error(sh, "Multiple servers registered. Specify target with -s <server_name>.");
+		return NULL;
+	}
+
+	return &s_servers[0];
+}
+
+static int cmd_nmbs_status(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	struct server_entry *entry = resolve_server(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	struct nmbs_z_server_info info;
+	memset(&info, 0, sizeof(info));
+	ret = entry->diag_cb(entry->ctx, &info, false);
+	if (ret != 0) {
+		shell_error(sh, "Failed to retrieve status for server '%s': %d", entry->name, ret);
+		return ret;
+	}
+
+	const char *state_str = "UNKNOWN";
+	switch (info.state) {
+	case NMBS_Z_SERVER_STATE_STOPPED:
+		state_str = "STOPPED";
+		break;
+	case NMBS_Z_SERVER_STATE_RUNNING:
+		state_str = "RUNNING";
+		break;
+	case NMBS_Z_SERVER_STATE_ERROR:
+		state_str = "ERROR";
+		break;
+	}
+
+	shell_print(sh, "Modbus Server '%s' Status:", entry->name);
+	shell_print(sh, "  Operational State:  %s", state_str);
+	if (info.port > 0) {
+		shell_print(sh, "  TCP Port:           %u", info.port);
+	} else {
+		shell_print(sh, "  Modbus Unit ID:     %u", info.unit_id);
+	}
+	shell_print(sh, "  Frames Received:    %u", info.stats.rx_frames);
+	shell_print(sh, "  Frames Transmitted: %u", info.stats.tx_frames);
+	shell_print(sh, "  Checksum Errors:    %u", info.stats.rx_errors);
+	shell_print(sh, "  Exceptions Sent:    %u", info.stats.exceptions_sent);
+	shell_print(sh, "  Requests Handled:   %u", info.stats.requests_handled);
+
+	return 0;
+}
+
+static int cmd_nmbs_reset_stats(const struct shell *sh, size_t argc, char **argv)
+{
+	struct nmbs_z_cli_options opts;
+	int ret = nmbs_z_shell_parse_options(sh, argc, argv, &opts);
+	if (ret != 0) {
+		return ret;
+	}
+
+	struct server_entry *entry = resolve_server(sh, &opts);
+	if (!entry) {
+		return -ENODEV;
+	}
+
+	struct nmbs_z_server_info info;
+	memset(&info, 0, sizeof(info));
+	ret = entry->diag_cb(entry->ctx, &info, true);
+	if (ret != 0) {
+		shell_error(sh, "Failed to reset stats for server '%s': %d", entry->name, ret);
+		return ret;
+	}
+
+	shell_print(sh, "OK: Diagnostic counters for server '%s' reset to 0.", entry->name);
+	return 0;
+}
+
+#endif /* CONFIG_NANOMODBUS_SHELL_SERVER */
+
+static int cmd_nmbs_list(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "nanoMODBUS Registered Instances:");
+
+	shell_print(sh, "Clients:");
+#ifdef CONFIG_NANOMODBUS_SHELL_CLIENT
+	if (s_client_count == 0) {
+		shell_print(sh, "  (none)");
+	} else {
+		for (size_t i = 0; i < s_client_count; i++) {
+			bool is_default = (s_client_count == 1);
+			uint8_t unit = s_clients[i].client->core.dest_address_rtu;
+			if (unit == 0) {
+				unit = 1;
+			}
+			int32_t to = s_clients[i].client->core.read_timeout_ms;
+			int32_t bto = s_clients[i].client->core.byte_timeout_ms;
+			shell_print(sh, "  [%u] '%s'%s -> Target Unit: %u, Timeout: %d ms, Byte Timeout: %d ms",
+				    (unsigned int)i, s_clients[i].name,
+				    is_default ? " (default)" : "",
+				    unit, to, bto);
+		}
+	}
+#else
+	shell_print(sh, "  (disabled)");
+#endif
+
+	shell_print(sh, "Servers:");
+#ifdef CONFIG_NANOMODBUS_SHELL_SERVER
+	if (s_server_count == 0) {
+		shell_print(sh, "  (none)");
+	} else {
+		for (size_t i = 0; i < s_server_count; i++) {
+			bool is_default = (s_server_count == 1);
+			struct nmbs_z_server_info info;
+			memset(&info, 0, sizeof(info));
+			int ret = s_servers[i].diag_cb(s_servers[i].ctx, &info, false);
+			const char *state_str = "UNKNOWN";
+			if (ret == 0) {
+				switch (info.state) {
+				case NMBS_Z_SERVER_STATE_STOPPED:
+					state_str = "STOPPED";
+					break;
+				case NMBS_Z_SERVER_STATE_RUNNING:
+					state_str = "RUNNING";
+					break;
+				case NMBS_Z_SERVER_STATE_ERROR:
+					state_str = "ERROR";
+					break;
+				}
+			}
+			if (info.port > 0) {
+				shell_print(sh, "  [%u] '%s'%s -> Type: TCP, Port: %u, State: %s",
+					    (unsigned int)i, s_servers[i].name,
+					    is_default ? " (default)" : "",
+					    info.port, state_str);
+			} else {
+				shell_print(sh, "  [%u] '%s'%s -> Type: RTU, Address: %u, State: %s",
+					    (unsigned int)i, s_servers[i].name,
+					    is_default ? " (default)" : "",
+					    info.unit_id, state_str);
+			}
+		}
+	}
+#else
+	shell_print(sh, "  (disabled)");
+#endif
+
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_nmbs,
+	SHELL_CMD_ARG(list, NULL, "List registered Modbus instances", cmd_nmbs_list, 1, 0),
 #ifdef CONFIG_NANOMODBUS_SHELL_CLIENT
 	SHELL_CMD_ARG(read-coils, NULL, "Read coils (FC 01)", cmd_nmbs_read_coils, 3, SHELL_OPT_ARG_CHECK_SKIP),
 	SHELL_CMD_ARG(read-discrete, NULL, "Read discrete inputs (FC 02)", cmd_nmbs_read_discrete, 3, SHELL_OPT_ARG_CHECK_SKIP),
@@ -873,8 +1135,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_nmbs,
 	SHELL_CMD_ARG(write-coils, NULL, "Write multiple coils (FC 15)", cmd_nmbs_write_coils, 3, SHELL_OPT_ARG_CHECK_SKIP),
 	SHELL_CMD_ARG(write-registers, NULL, "Write multiple registers (FC 16)", cmd_nmbs_write_registers, 3, SHELL_OPT_ARG_CHECK_SKIP),
 #endif
+#ifdef CONFIG_NANOMODBUS_SHELL_SERVER
+	SHELL_CMD_ARG(reset-stats, NULL, "Reset server diagnostic counters to 0", cmd_nmbs_reset_stats, 1, SHELL_OPT_ARG_CHECK_SKIP),
+	SHELL_CMD_ARG(status, NULL, "Display server operational status and diagnostics", cmd_nmbs_status, 1, SHELL_OPT_ARG_CHECK_SKIP),
+#endif
 	SHELL_SUBCMD_SET_END
 );
 
 SHELL_CMD_REGISTER(nmbs, &sub_nmbs, "nanoMODBUS commands", NULL);
+
 

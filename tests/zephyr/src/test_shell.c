@@ -17,9 +17,21 @@ static void test_shell_after(void *fixture)
 	nmbs_z_shell_unregister_client("my_client");
 	nmbs_z_shell_unregister_server("srv0");
 	nmbs_z_shell_unregister_server("srv_test");
+	nmbs_z_shell_unregister_server("srv_rtu_h");
+	nmbs_z_shell_unregister_server("srv_tcp_h");
 }
 
-ZTEST_SUITE(nanomodbus_shell, NULL, NULL, NULL, test_shell_after, NULL);
+static void *test_shell_setup(void)
+{
+	const struct shell *sh = shell_backend_dummy_get_ptr();
+
+	WAIT_FOR(shell_ready(sh), 20000, k_msleep(1));
+	zassert_true(shell_ready(sh), "timed out waiting for dummy shell backend");
+
+	return NULL;
+}
+
+ZTEST_SUITE(nanomodbus_shell, NULL, test_shell_setup, NULL, test_shell_after, NULL);
 
 ZTEST(nanomodbus_shell, test_shell_interface_and_kconfig_baseline)
 {
@@ -503,5 +515,150 @@ ZTEST(nanomodbus_shell, test_shell_cmd_lock_contention_timeout)
     zassert_not_null(strstr(out, "Client busy: Lock timeout expired"), "Missing timeout msg: %s", out);
 }
 
+static struct nmbs_z_server_stats s_mock_server_stats;
 
+static void mock_server_init_stats(void)
+{
+    s_mock_server_stats.rx_frames = 100;
+    s_mock_server_stats.tx_frames = 98;
+    s_mock_server_stats.rx_errors = 2;
+    s_mock_server_stats.exceptions_sent = 1;
+    s_mock_server_stats.requests_handled = 97;
+}
 
+static int mock_server_diag_cb(void *ctx, struct nmbs_z_server_info *info, bool reset)
+{
+    if (info) {
+        info->state = NMBS_Z_SERVER_STATE_RUNNING;
+        info->unit_id = 1;
+        info->port = 0;
+        info->stats = s_mock_server_stats;
+    }
+
+    if (reset) {
+        memset(&s_mock_server_stats, 0, sizeof(s_mock_server_stats));
+    }
+    return 0;
+}
+
+ZTEST(nanomodbus_shell, test_shell_cmd_list)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    size_t out_len;
+    const char *out;
+
+    ensure_test_client_registered();
+
+    shell_backend_dummy_clear_output(sh);
+    int ret = shell_execute_cmd(sh, "nmbs list");
+    zassert_equal(ret, 0, "Execution failed: %d", ret);
+
+    out = shell_backend_dummy_get_output(sh, &out_len);
+    zassert_not_null(strstr(out, "nanoMODBUS Registered Instances:"), "Missing header: %s", out);
+    zassert_not_null(strstr(out, "Clients:"), "Missing clients section: %s", out);
+    zassert_not_null(strstr(out, "Servers:"), "Missing servers section: %s", out);
+}
+
+ZTEST(nanomodbus_shell, test_shell_cmd_server_status)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    size_t out_len;
+    const char *out;
+
+    mock_server_init_stats();
+    nmbs_z_shell_register_server("srv_test", (void *)0x1234, mock_server_diag_cb);
+
+    shell_backend_dummy_clear_output(sh);
+    int ret = shell_execute_cmd(sh, "nmbs status -s srv_test");
+    zassert_equal(ret, 0, "Execution failed: %d", ret);
+
+    out = shell_backend_dummy_get_output(sh, &out_len);
+    zassert_not_null(strstr(out, "Frames Received:    100"), "Missing rx_frames: %s", out);
+    zassert_not_null(strstr(out, "Checksum Errors:    2"), "Missing rx_errors: %s", out);
+    zassert_not_null(strstr(out, "Operational State:  RUNNING"), "Missing state: %s", out);
+}
+
+ZTEST(nanomodbus_shell, test_shell_cmd_server_reset_stats)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    size_t out_len;
+    const char *out;
+
+    mock_server_init_stats();
+    nmbs_z_shell_register_server("srv_test", (void *)0x1234, mock_server_diag_cb);
+
+    shell_backend_dummy_clear_output(sh);
+    int ret = shell_execute_cmd(sh, "nmbs reset-stats -s srv_test");
+    zassert_equal(ret, 0, "Execution failed: %d", ret);
+
+    out = shell_backend_dummy_get_output(sh, &out_len);
+    zassert_not_null(strstr(out, "reset to 0"), "Missing reset confirmation: %s", out);
+
+    /* Verify subsequent status displays 0 */
+    shell_backend_dummy_clear_output(sh);
+    shell_execute_cmd(sh, "nmbs status -s srv_test");
+    out = shell_backend_dummy_get_output(sh, &out_len);
+    zassert_not_null(strstr(out, "Frames Received:    0"), "Stats not reset: %s", out);
+
+    nmbs_z_shell_unregister_server("srv_test");
+}
+
+ZTEST(nanomodbus_shell, test_shell_cmd_server_rtu_helper)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    size_t out_len;
+    const char *out;
+    static nmbs_z_server_rtu_t rtu_srv;
+
+    memset(&rtu_srv, 0, sizeof(rtu_srv));
+    rtu_srv.server_address = 7;
+    atomic_set(&rtu_srv.running, 1);
+
+    int ret = nmbs_z_shell_register_server_rtu("srv_rtu_h", &rtu_srv);
+    zassert_equal(ret, 0, "Registration failed: %d", ret);
+
+    shell_backend_dummy_clear_output(sh);
+    ret = shell_execute_cmd(sh, "nmbs status -s srv_rtu_h");
+    zassert_equal(ret, 0, "Execution failed: %d", ret);
+
+    out = shell_backend_dummy_get_output(sh, &out_len);
+    zassert_not_null(strstr(out, "Modbus Server 'srv_rtu_h' Status:"), "Missing status header: %s", out);
+    zassert_not_null(strstr(out, "Operational State:  RUNNING"), "Missing state: %s", out);
+    zassert_not_null(strstr(out, "Modbus Unit ID:     7"), "Missing unit ID: %s", out);
+
+    /* Test reset stats */
+    shell_backend_dummy_clear_output(sh);
+    ret = shell_execute_cmd(sh, "nmbs reset-stats -s srv_rtu_h");
+    zassert_equal(ret, 0, "Reset stats failed: %d", ret);
+
+    out = shell_backend_dummy_get_output(sh, &out_len);
+    zassert_not_null(strstr(out, "reset to 0"), "Missing reset confirmation: %s", out);
+
+    nmbs_z_shell_unregister_server("srv_rtu_h");
+}
+
+ZTEST(nanomodbus_shell, test_shell_cmd_server_tcp_helper)
+{
+    const struct shell *sh = shell_backend_dummy_get_ptr();
+    size_t out_len;
+    const char *out;
+    static nmbs_z_server_tcp_t tcp_srv;
+
+    memset(&tcp_srv, 0, sizeof(tcp_srv));
+    tcp_srv.port = 5020;
+    atomic_set(&tcp_srv.running, 0);
+
+    int ret = nmbs_z_shell_register_server_tcp("srv_tcp_h", &tcp_srv);
+    zassert_equal(ret, 0, "Registration failed: %d", ret);
+
+    shell_backend_dummy_clear_output(sh);
+    ret = shell_execute_cmd(sh, "nmbs status -s srv_tcp_h");
+    zassert_equal(ret, 0, "Execution failed: %d", ret);
+
+    out = shell_backend_dummy_get_output(sh, &out_len);
+    zassert_not_null(strstr(out, "Modbus Server 'srv_tcp_h' Status:"), "Missing status header: %s", out);
+    zassert_not_null(strstr(out, "Operational State:  STOPPED"), "Missing state: %s", out);
+    zassert_not_null(strstr(out, "TCP Port:           5020"), "Missing port: %s", out);
+
+    nmbs_z_shell_unregister_server("srv_tcp_h");
+}
