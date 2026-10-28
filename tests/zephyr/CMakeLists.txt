@@ -10,4 +10,5 @@ target_sources(app PRIVATE
     src/test_server_rtu.c
     src/test_server_tcp.c
     src/test_multi_instance.c
+    src/test_nanomodbus_serial.c
 )

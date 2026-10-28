@@ -1,0 +1,65 @@
+# Copyright (c) 2026 nanoMODBUS Contributors
+# SPDX-License-Identifier: MIT
+
+description: nanoMODBUS Serial RTU transport device
+
+compatible: "nanomodbus,serial"
+
+include:
+  - uart-device.yaml
+  - base.yaml
+
+bus: modbus
+
+properties:
+  de-gpios:
+    type: phandle-array
+    description: RS-485 Driver Enable (DE) GPIO pin.
+
+  re-gpios:
+    type: phandle-array
+    description: |
+      RS-485 Receiver Enable (RE) GPIO pin.
+      If connected directly the MCU pin should be configured as active low.
+
+  de-pre-delay-us:
+    type: int
+    default: 0
+    description: Guard time before TX with DE high in microseconds (GPIO mode).
+
+  de-post-delay-us:
+    type: int
+    default: 0
+    description: Guard time after TX before DE low in microseconds (GPIO mode).
+
+  de-mode:
+    type: string
+    default: "auto"
+    enum:
+      - "auto"
+      - "hardware"
+      - "gpio"
+      - "none"
+    description: Driver-enable control strategy.
+
+  rx-mode:
+    type: string
+    default: "auto"
+    enum:
+      - "auto"
+      - "irq"
+      - "async"
+      - "external"
+    description: Receive path selection.
+
+  current-speed:
+    type: int
+    description: Baud rate in bits per second.
+
+child-binding:
+  description: Modbus child slave node
+  properties:
+    reg:
+      type: int
+      required: true
+      description: Modbus slave ID / unit identifier.

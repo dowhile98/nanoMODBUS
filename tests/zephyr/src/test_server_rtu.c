@@ -434,4 +434,168 @@ ZTEST(nanomodbus_server_rtu, test_server_rtu_diagnostics_stats)
     nmbs_z_server_rtu_stop(&stats_server);
 }
 
+/* ========================================================================= */
+/* Test 5: RTU Server set_address and get_address                            */
+/* ========================================================================= */
+ZTEST(nanomodbus_server_rtu, test_server_rtu_set_and_get_address)
+{
+    static nmbs_z_server_rtu_t addr_server;
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = DEVICE_GET(mock_server_uart_dev),
+        .baud_rate = 115200,
+        .de_pre_delay_us = 0,
+        .de_post_delay_us = 0,
+    };
+    nmbs_callbacks cbs = {0};
+
+    int ret = nmbs_z_server_rtu_init(&addr_server, &cfg, &cbs, 1);
+    zassert_equal(ret, 0, "Server init must succeed");
+
+    /* Verify initial address */
+    zassert_equal(nmbs_z_server_rtu_get_address(&addr_server), 1, "Initial address must be 1");
+
+    /* Set valid address */
+    ret = nmbs_z_server_rtu_set_address(&addr_server, 42);
+    zassert_equal(ret, 0, "set_address must succeed");
+    zassert_equal(nmbs_z_server_rtu_get_address(&addr_server), 42, "get_address must return 42");
+    zassert_equal(addr_server.core.address_rtu, 42, "core address_rtu must be 42");
+    zassert_equal(addr_server.server_address, 42, "server_address must be 42");
+
+    /* Parameter validation */
+    zassert_equal(nmbs_z_server_rtu_set_address(NULL, 10), -EINVAL, "NULL server set_address");
+    zassert_equal(nmbs_z_server_rtu_set_address(&addr_server, 0), -EINVAL, "slave_id 0 is invalid");
+    zassert_equal(nmbs_z_server_rtu_set_address(&addr_server, 248), -EINVAL, "slave_id 248 is invalid");
+    zassert_equal(nmbs_z_server_rtu_get_address(NULL), 0, "NULL server get_address returns 0");
+
+    nmbs_z_server_rtu_stop(&addr_server);
+}
+
+/* ========================================================================= */
+/* Test 6: RTU Server reconfiguration and selective address response         */
+/* ========================================================================= */
+ZTEST(nanomodbus_server_rtu, test_server_rtu_reconfigure)
+{
+    reset_server_tracker();
+
+    static nmbs_z_server_rtu_t reconfig_server;
+    nmbs_z_serial_transport_config_t cfg = {
+        .uart_dev = DEVICE_GET(mock_server_uart_dev),
+        .baud_rate = 115200,
+        .de_pre_delay_us = 0,
+        .de_post_delay_us = 0,
+    };
+
+    nmbs_callbacks cbs = {0};
+    cbs.read_holding_registers = mock_read_holding_registers;
+
+    int ret = nmbs_z_server_rtu_init(&reconfig_server, &cfg, &cbs, 1);
+    zassert_equal(ret, 0, "Server init must succeed");
+
+    /* Use short timeout so ignored requests destined for other slaves don't block tests */
+    nmbs_set_read_timeout(&reconfig_server.core, 2);
+    nmbs_set_byte_timeout(&reconfig_server.core, 2);
+
+    /* Parameter validation */
+    zassert_equal(nmbs_z_server_rtu_reconfigure(NULL, NULL, 1), -EINVAL, "NULL server");
+    zassert_equal(nmbs_z_server_rtu_reconfigure(&reconfig_server, NULL, 248), -EINVAL, "slave_id > 247");
+    struct uart_config invalid_cfg = { .baudrate = 0 };
+    zassert_equal(nmbs_z_server_rtu_reconfigure(&reconfig_server, &invalid_cfg, 1), -EINVAL, "0 baudrate");
+
+    /* Initial state: responds to address 1 */
+    reset_server_tracker();
+    uint8_t req_fc03_addr1[8] = {1, 3, 0x00, 0x0A, 0x00, 0x02, 0, 0};
+    helper_append_crc(req_fc03_addr1, 6);
+
+    for (size_t i = 0; i < sizeof(req_fc03_addr1); i++) {
+        nmbs_z_server_rtu_rx_byte(&reconfig_server, req_fc03_addr1[i]);
+    }
+    k_sleep(K_MSEC(10));
+
+    zassert_true(server_cb_tracker.read_holding_called, "Server must respond to address 1 initially");
+    zassert_equal(server_cb_tracker.unit_id, 1, "Unit ID must be 1");
+    zassert_equal(mock_server_tx_len, 9, "Response length must be 9 bytes");
+
+    /* Reconfigure with uart_cfg == NULL: only changes slave ID to 5 */
+    ret = nmbs_z_server_rtu_reconfigure(&reconfig_server, NULL, 5);
+    zassert_equal(ret, 0, "Reconfigure with NULL uart_cfg must succeed");
+    zassert_equal(nmbs_z_server_rtu_get_address(&reconfig_server), 5, "Slave address must be 5");
+    zassert_equal(reconfig_server.transport.cfg.baud_rate, 115200, "Baud rate must remain 115200");
+
+    /* Verify server ignores old address 1 */
+    reset_server_tracker();
+    for (size_t i = 0; i < sizeof(req_fc03_addr1); i++) {
+        nmbs_z_server_rtu_rx_byte(&reconfig_server, req_fc03_addr1[i]);
+    }
+    k_sleep(K_MSEC(10));
+
+    zassert_false(server_cb_tracker.read_holding_called, "Server must NOT respond to old address 1");
+    zassert_equal(mock_server_tx_len, 0, "No TX for ignored address 1");
+
+    /* Verify server responds to new address 5 */
+    reset_server_tracker();
+    uint8_t req_fc03_addr5[8] = {5, 3, 0x00, 0x0A, 0x00, 0x02, 0, 0};
+    helper_append_crc(req_fc03_addr5, 6);
+
+    for (size_t i = 0; i < sizeof(req_fc03_addr5); i++) {
+        nmbs_z_server_rtu_rx_byte(&reconfig_server, req_fc03_addr5[i]);
+    }
+    k_sleep(K_MSEC(10));
+
+    zassert_true(server_cb_tracker.read_holding_called, "Server must respond to new address 5");
+    zassert_equal(server_cb_tracker.unit_id, 5, "Unit ID must be 5");
+    zassert_equal(mock_server_tx_len, 9, "Response length must be 9 bytes");
+
+    /* Reconfigure with slave_id == 0: only changes UART settings */
+    struct uart_config new_uart_cfg = {
+        .baudrate = 57600,
+        .parity = UART_CFG_PARITY_EVEN,
+        .stop_bits = UART_CFG_STOP_BITS_2,
+        .data_bits = UART_CFG_DATA_BITS_8,
+    };
+    ret = nmbs_z_server_rtu_reconfigure(&reconfig_server, &new_uart_cfg, 0);
+    zassert_equal(ret, 0, "Reconfigure with slave_id 0 must succeed");
+    zassert_equal(nmbs_z_server_rtu_get_address(&reconfig_server), 5, "Slave address must remain 5");
+    zassert_equal(reconfig_server.transport.cfg.baud_rate, 57600, "Baud rate updated to 57600");
+    zassert_equal(reconfig_server.transport.cfg.parity, UART_CFG_PARITY_EVEN, "Parity updated to EVEN");
+    zassert_equal(reconfig_server.transport.cfg.stop_bits, UART_CFG_STOP_BITS_2, "Stop bits updated to 2");
+    zassert_equal(reconfig_server.transport.cfg.data_bits, UART_CFG_DATA_BITS_8, "Data bits updated to 8");
+
+    /* Verify server continues responding to address 5 after UART reconfiguration */
+    reset_server_tracker();
+    for (size_t i = 0; i < sizeof(req_fc03_addr5); i++) {
+        nmbs_z_server_rtu_rx_byte(&reconfig_server, req_fc03_addr5[i]);
+    }
+    k_sleep(K_MSEC(10));
+
+    zassert_true(server_cb_tracker.read_holding_called, "Server must still respond to address 5");
+    zassert_equal(server_cb_tracker.unit_id, 5, "Unit ID must be 5");
+
+    /* Reconfigure both UART settings and slave address simultaneously */
+    new_uart_cfg.baudrate = 19200;
+    ret = nmbs_z_server_rtu_reconfigure(&reconfig_server, &new_uart_cfg, 7);
+    zassert_equal(ret, 0, "Simultaneous reconfigure must succeed");
+    zassert_equal(nmbs_z_server_rtu_get_address(&reconfig_server), 7, "Slave address must be 7");
+    zassert_equal(reconfig_server.transport.cfg.baud_rate, 19200, "Baud rate must be 19200");
+
+    /* Verify responds only to 7 */
+    reset_server_tracker();
+    for (size_t i = 0; i < sizeof(req_fc03_addr5); i++) {
+        nmbs_z_server_rtu_rx_byte(&reconfig_server, req_fc03_addr5[i]);
+    }
+    k_sleep(K_MSEC(10));
+    zassert_false(server_cb_tracker.read_holding_called, "Server must NOT respond to address 5");
+
+    reset_server_tracker();
+    uint8_t req_fc03_addr7[8] = {7, 3, 0x00, 0x0A, 0x00, 0x02, 0, 0};
+    helper_append_crc(req_fc03_addr7, 6);
+    for (size_t i = 0; i < sizeof(req_fc03_addr7); i++) {
+        nmbs_z_server_rtu_rx_byte(&reconfig_server, req_fc03_addr7[i]);
+    }
+    k_sleep(K_MSEC(10));
+    zassert_true(server_cb_tracker.read_holding_called, "Server must respond to address 7");
+    zassert_equal(server_cb_tracker.unit_id, 7, "Unit ID must be 7");
+
+    nmbs_z_server_rtu_stop(&reconfig_server);
+}
+
 ZTEST_SUITE(nanomodbus_server_rtu, NULL, NULL, NULL, NULL, NULL);

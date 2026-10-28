@@ -109,14 +109,26 @@ static nmbs_error handle_write_single_coil(uint16_t address, bool value,
     return NMBS_ERROR_NONE;
 }
 
-#if DT_HAS_ALIAS(modbus_uart)
-#define MODBUS_UART_NODE DT_ALIAS(modbus_uart)
+#if DT_NODE_EXISTS(DT_NODELABEL(modbus0))
+#define MODBUS_NODE DT_NODELABEL(modbus0)
+#elif DT_HAS_COMPAT_STATUS_OKAY(nanomodbus_serial)
+#define MODBUS_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(nanomodbus_serial)
+#elif DT_HAS_COMPAT_STATUS_OKAY(zephyr_modbus_serial)
+#define MODBUS_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(zephyr_modbus_serial)
+#elif DT_HAS_ALIAS(modbus_uart)
+#define MODBUS_NODE DT_ALIAS(modbus_uart)
 #elif DT_NODE_EXISTS(DT_CHOSEN(zephyr_console))
-#define MODBUS_UART_NODE DT_CHOSEN(zephyr_console)
+#define MODBUS_NODE DT_CHOSEN(zephyr_console)
 #elif DT_NODE_EXISTS(DT_NODELABEL(usart3))
-#define MODBUS_UART_NODE DT_NODELABEL(usart3)
+#define MODBUS_NODE DT_NODELABEL(usart3)
 #else
-#define MODBUS_UART_NODE DT_INVALID_NODE
+#define MODBUS_NODE DT_INVALID_NODE
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(server_node))
+#define SERVER_SLAVE_ADDR NMBS_Z_DT_SLAVE_ID(DT_NODELABEL(server_node))
+#else
+#define SERVER_SLAVE_ADDR 1
 #endif
 
 static const char *rx_mode_name(nmbs_z_serial_rx_mode_t mode)
@@ -132,30 +144,6 @@ static const char *rx_mode_name(nmbs_z_serial_rx_mode_t mode)
     }
 }
 
-/*
- * Pick the best receive path the UART actually supports.
- *
- * Async RX needs the async API and DMA channels in devicetree. It also needs
- * the DMA-visible buffers to be non-cacheable: the transport keeps them in
- * .bss, so on a cache-enabled MCU (STM32H7 with CONFIG_DCACHE) the STM32 UART
- * driver rejects them. Fall back to IRQ mode in that case instead of failing
- * to initialize; the nucleo_h743zi board config disables the data cache so
- * this sample exercises the DMA path there.
- */
-static nmbs_z_serial_rx_mode_t select_rx_mode(void)
-{
-#if defined(CONFIG_UART_ASYNC_API) && DT_NODE_EXISTS(MODBUS_UART_NODE) && !defined(CONFIG_DCACHE)
-    if (DT_NODE_HAS_PROP(MODBUS_UART_NODE, dmas)) {
-        return NMBS_Z_SERIAL_RX_ASYNC;
-    }
-#endif
-#if defined(CONFIG_UART_INTERRUPT_DRIVEN)
-    return NMBS_Z_SERIAL_RX_IRQ;
-#else
-    return NMBS_Z_SERIAL_RX_EXTERNAL;
-#endif
-}
-
 int main(void)
 {
     LOG_INF("nanoMODBUS RTU Server Sample Application Starting...");
@@ -164,29 +152,15 @@ int main(void)
         holding_registers[i] = (uint16_t)(0x1000 + i);
     }
 
-    const struct device *uart_dev = NULL;
-#if DT_NODE_EXISTS(MODBUS_UART_NODE)
-    uart_dev = DEVICE_DT_GET(MODBUS_UART_NODE);
+#if DT_NODE_EXISTS(MODBUS_NODE)
+    nmbs_z_serial_transport_config_t config = NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(MODBUS_NODE);
+#else
+    nmbs_z_serial_transport_config_t config = {0};
 #endif
 
-    if (!uart_dev || !device_is_ready(uart_dev)) {
+    if (!config.uart_dev || !device_is_ready(config.uart_dev)) {
         LOG_WRN("UART device not ready or not found; running in simulated idle loop");
     }
-
-    nmbs_z_serial_transport_config_t config = {
-        .uart_dev = uart_dev,
-        .baud_rate = 115200,
-        .de_pre_delay_us = 0,
-        .de_post_delay_us = 0,
-        .parity = UART_CFG_PARITY_NONE,
-        .stop_bits = UART_CFG_STOP_BITS_1,
-        .data_bits = UART_CFG_DATA_BITS_8,
-        .de_mode = NMBS_Z_SERIAL_DE_AUTO,
-        .rx_mode = select_rx_mode(),
-    };
-#if DT_HAS_ALIAS(modbus_de)
-    config.de_gpio = (struct gpio_dt_spec)GPIO_DT_SPEC_GET(DT_ALIAS(modbus_de), gpios);
-#endif
 
     nmbs_callbacks cbs = {
         .read_holding_registers = handle_read_holding_registers,
@@ -199,7 +173,7 @@ int main(void)
     /* Static storage: the instance owns a workqueue thread stack. */
     static nmbs_z_server_rtu_t server;
 
-    int ret = nmbs_z_server_rtu_init(&server, &config, &cbs, 1 /* RTU slave address */);
+    int ret = nmbs_z_server_rtu_init(&server, &config, &cbs, SERVER_SLAVE_ADDR);
     if (ret != 0) {
         LOG_ERR("Failed to initialize RTU Server: %d", ret);
         return ret;
@@ -211,13 +185,14 @@ int main(void)
         return ret;
     }
 
-    LOG_INF("Modbus RTU Server started (slave ID 1, 115200 bps, RX %s)", rx_mode_name(config.rx_mode));
+    LOG_INF("Modbus RTU Server started (slave ID %u, %u bps, RX %s)",
+            (unsigned int)SERVER_SLAVE_ADDR, config.baud_rate, rx_mode_name(config.rx_mode));
 
-    if (config.rx_mode == NMBS_Z_SERIAL_RX_EXTERNAL && uart_dev && device_is_ready(uart_dev)) {
+    if (config.rx_mode == NMBS_Z_SERIAL_RX_EXTERNAL && config.uart_dev && device_is_ready(config.uart_dev)) {
         LOG_INF("Polling UART for incoming Modbus frames...");
         while (1) {
             unsigned char c;
-            if (uart_poll_in(uart_dev, &c) == 0) {
+            if (uart_poll_in(config.uart_dev, &c) == 0) {
                 nmbs_z_server_rtu_rx_byte(&server, (uint8_t)c);
             } else {
                 k_sleep(K_MSEC(1));

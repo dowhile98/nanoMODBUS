@@ -12,6 +12,7 @@
 / {
 	aliases {
 		modbus-uart = &usart2;
+		modbus0 = &modbus0;
 	};
 };
 
@@ -26,6 +27,19 @@
 	       <&dmamux1 3 43 STM32_DMA_PERIPH_RX>;
 	dma-names = "tx", "rx";
 	status = "okay";
+
+	modbus0: modbus0 {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		de-mode = "auto";
+		rx-mode = "auto";
+
+		server_node: slave@1 {
+			reg = <1>;
+		};
+	};
 };
 
 &dma1 {

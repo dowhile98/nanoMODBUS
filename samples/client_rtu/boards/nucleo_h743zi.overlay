@@ -6,13 +6,14 @@
  * ST-LINK virtual COM port (USART3), so the two do not conflict.
  *
  * No RS-485 driver-enable is configured: the bench converter is full duplex.
- * For a half-duplex transceiver add a `modbus-de` GPIO alias, or switch the
- * UART to hardware DE (`de-enable` plus the RTS pin in pinctrl-0).
+ * For a half-duplex transceiver add a `de-gpios` property or `modbus-de` GPIO alias,
+ * or switch the UART to hardware DE (`de-enable` plus the RTS pin in pinctrl-0).
  */
 
 / {
 	aliases {
 		modbus-uart = &usart2;
+		modbus0 = &modbus0;
 	};
 };
 
@@ -21,4 +22,17 @@
 	pinctrl-names = "default";
 	current-speed = <115200>;
 	status = "okay";
+
+	modbus0: modbus0 {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		de-mode = "auto";
+		rx-mode = "auto";
+
+		client_target: slave@1 {
+			reg = <1>;
+		};
+	};
 };

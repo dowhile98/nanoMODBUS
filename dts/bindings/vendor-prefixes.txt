@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 nanoMODBUS Contributors
+# SPDX-License-Identifier: MIT
+#
+# Device tree binding vendor prefix registry for nanoMODBUS.
+
+nanomodbus	nanoMODBUS

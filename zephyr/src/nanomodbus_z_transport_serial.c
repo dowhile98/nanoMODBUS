@@ -42,6 +42,11 @@ void nmbs_z_serial_calc_timings(uint32_t baud_rate, uint32_t *t1_5_us, uint32_t 
 static int serial_apply_line_config(nmbs_z_serial_transport_t *transport)
 {
     const struct device *dev = transport->cfg.uart_dev;
+
+    if (dev == NULL) {
+        return 0;
+    }
+
     struct uart_config uart_cfg;
     int ret = uart_config_get(dev, &uart_cfg);
 
@@ -142,8 +147,25 @@ static int serial_resolve_de(nmbs_z_serial_transport_t *transport)
 
     if (hw_de) {
         LOG_DBG("Using UART hardware RS-485 driver-enable");
-    } else if (gpio_de) {
-        LOG_DBG("Using GPIO RS-485 driver-enable");
+    } else {
+        if (gpio_de) {
+            LOG_DBG("Using GPIO RS-485 driver-enable");
+        }
+        if (config->re_gpio.port != NULL) {
+            if (!device_is_ready(config->re_gpio.port)) {
+                LOG_ERR("RS-485 RE GPIO port not ready");
+                return -ENODEV;
+            }
+
+            int ret = gpio_pin_configure_dt(&config->re_gpio, GPIO_OUTPUT_ACTIVE);
+            if (ret < 0) {
+                LOG_ERR("Failed to configure RS-485 RE pin (%d)", ret);
+                return ret;
+            }
+
+            transport->re_gpio = true;
+            LOG_DBG("Using GPIO RS-485 receiver-enable");
+        }
     }
 
     return 0;
@@ -452,6 +474,58 @@ void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t *transport)
     if (transport->de_gpio) {
         (void)gpio_pin_set_dt(&transport->cfg.de_gpio, 0);
     }
+    if (transport->re_gpio) {
+        (void)gpio_pin_set_dt(&transport->cfg.re_gpio, 1);
+    }
+}
+
+int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t *transport,
+                                        const struct uart_config *uart_cfg)
+{
+    if (!transport) {
+        return -EINVAL;
+    }
+
+    if (uart_cfg != NULL) {
+        if (uart_cfg->baudrate == 0) {
+            return -EINVAL;
+        }
+
+        transport->cfg.baud_rate = uart_cfg->baudrate;
+        transport->cfg.parity = (uint8_t)uart_cfg->parity;
+        transport->cfg.stop_bits = (uint8_t)uart_cfg->stop_bits;
+        transport->cfg.data_bits = (uint8_t)uart_cfg->data_bits;
+    }
+
+    bool was_active = (atomic_get(&transport->rx_active) != 0);
+
+    if (was_active) {
+        (void)nmbs_z_serial_transport_stop_rx(transport);
+    }
+
+    int ret = 0;
+    if (transport->cfg.uart_dev != NULL) {
+        ret = serial_apply_line_config(transport);
+        if (ret != 0) {
+            if (was_active) {
+                (void)nmbs_z_serial_transport_start_rx(transport);
+            }
+            return ret;
+        }
+    }
+
+    nmbs_z_serial_calc_timings(transport->cfg.baud_rate, &transport->t1_5_us, &transport->t3_5_us);
+
+    nmbs_z_transport_serial_flush(NULL, transport);
+
+    if (was_active) {
+        ret = nmbs_z_serial_transport_start_rx(transport);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    return 0;
 }
 
 int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_t byte_timeout_ms, void *arg)
@@ -468,8 +542,13 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
 
     nmbs_z_serial_transport_t *transport = (nmbs_z_serial_transport_t *)arg;
     bool gpio_de = transport->de_gpio;
+    bool gpio_re = transport->re_gpio;
 
-    /* 1. Assert RS-485 DE pin (hardware DE is driven by the UART itself). */
+    /* 1. Disable RX (if RE GPIO present) and assert RS-485 DE pin (hardware DE is driven by the UART itself). */
+    if (gpio_re) {
+        gpio_pin_set_dt(&transport->cfg.re_gpio, 0);
+    }
+
     if (gpio_de) {
         gpio_pin_set_dt(&transport->cfg.de_gpio, 1);
         if (transport->cfg.de_pre_delay_us > 0) {
@@ -508,6 +587,10 @@ int32_t nmbs_z_transport_serial_write(const uint8_t *buf, uint16_t count, int32_
             k_busy_wait(transport->cfg.de_post_delay_us);
         }
         gpio_pin_set_dt(&transport->cfg.de_gpio, 0);
+    }
+
+    if (gpio_re) {
+        gpio_pin_set_dt(&transport->cfg.re_gpio, 1);
     }
 
     return (int32_t)count;

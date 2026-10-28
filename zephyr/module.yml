@@ -2,3 +2,5 @@ name: nanomodbus
 build:
   cmake: zephyr
   kconfig: zephyr/Kconfig
+  settings:
+    dts_root: .

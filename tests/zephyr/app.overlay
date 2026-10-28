@@ -1,0 +1,67 @@
+/*
+ * Copyright (c) 2026 nanoMODBUS Contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+	aliases {
+		modbus-de = &led0;
+	};
+};
+
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+
+	test_nmbs_node: modbus_test {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		de-gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>;
+		re-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;
+		de-pre-delay-us = <15>;
+		de-post-delay-us = <25>;
+		de-mode = "gpio";
+		rx-mode = "external";
+		current-speed = <57600>;
+
+		test_slave_1: slave@1 {
+			reg = <1>;
+		};
+
+		test_slave_42: slave@2a {
+			reg = <0x2a>;
+		};
+	};
+
+	test_nmbs_auto: modbus_auto {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		de-mode = "auto";
+		rx-mode = "auto";
+	};
+
+	test_nmbs_hw: modbus_hw {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		de-mode = "hardware";
+		rx-mode = "irq";
+	};
+
+	test_nmbs_none: modbus_none {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		de-mode = "none";
+		rx-mode = "async";
+	};
+
+	test_zephyr_modbus: modbus_z {
+		compatible = "zephyr,modbus-serial";
+		status = "okay";
+		de-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+		re-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+	};
+};

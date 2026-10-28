@@ -13,9 +13,11 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/ring_buffer.h>
+#include <zephyr/sys/util.h>
 #include <nanomodbus.h>
 #include "nanomodbus_z.h"
 
@@ -96,7 +98,8 @@ typedef void (*nmbs_z_serial_rx_cb_t)(struct nmbs_z_serial_transport *transport,
  */
 typedef struct nmbs_z_serial_transport_config {
     const struct device *uart_dev;       /**< UART device handle */
-    struct gpio_dt_spec de_gpio;         /**< RS-485 DE/RE GPIO pin spec (optional) */
+    struct gpio_dt_spec de_gpio;         /**< RS-485 DE GPIO pin spec (optional) */
+    struct gpio_dt_spec re_gpio;         /**< RS-485 RE GPIO pin spec (optional, active-low) */
     uint32_t baud_rate;                  /**< Baud rate in bps */
     uint32_t de_pre_delay_us;            /**< Guard time before TX with DE high (us, GPIO mode) */
     uint32_t de_post_delay_us;           /**< Guard time after TX before DE low (us, GPIO mode) */
@@ -129,7 +132,110 @@ typedef struct nmbs_z_serial_transport {
     struct k_work rx_restart_work;       /**< Deferred recovery after a UART RX error */
     bool de_hw;                          /**< UART hardware driver-enable is active */
     bool de_gpio;                        /**< Software GPIO driver-enable is active */
+    bool re_gpio;                        /**< Software GPIO receiver-enable is active */
 } nmbs_z_serial_transport_t;
+
+/** @cond INTERNAL_HIDDEN */
+#define _NMBS_Z_UART_NODE_FROM_MODBUS(node_id) \
+    COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, nanomodbus_serial), \
+        (DT_PARENT(node_id)), \
+        (COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, zephyr_modbus_serial), \
+            (DT_PARENT(node_id)), \
+            (node_id))))
+
+#define _NMBS_Z_DT_BAUD_RATE(node_id) \
+    DT_PROP_OR(node_id, current_speed, \
+        DT_PROP_OR(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id), current_speed, 115200))
+
+#define _NMBS_Z_DT_DE_GPIO(node_id) \
+    COND_CODE_1(DT_NODE_HAS_PROP(node_id, de_gpios), \
+        (GPIO_DT_SPEC_GET(node_id, de_gpios)), \
+        (COND_CODE_1(DT_HAS_ALIAS(modbus_de), \
+            (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_de), gpios, {0})), \
+            ({0}))))
+
+#define _NMBS_Z_DT_RE_GPIO(node_id) \
+    COND_CODE_1(DT_NODE_HAS_PROP(node_id, re_gpios), \
+        (GPIO_DT_SPEC_GET(node_id, re_gpios)), \
+        (COND_CODE_1(DT_HAS_ALIAS(modbus_re), \
+            (GPIO_DT_SPEC_GET_OR(DT_ALIAS(modbus_re), gpios, {0})), \
+            ({0}))))
+
+#define _NMBS_Z_DT_DE_PRE_DELAY(node_id) \
+    DT_PROP_OR(node_id, de_pre_delay_us, 0)
+
+#define _NMBS_Z_DT_DE_POST_DELAY(node_id) \
+    DT_PROP_OR(node_id, de_post_delay_us, 0)
+
+#define _NMBS_Z_DT_DE_MODE(node_id) \
+    _CONCAT(NMBS_Z_SERIAL_DE_, DT_STRING_UPPER_TOKEN_OR(node_id, de_mode, AUTO))
+
+#define _NMBS_Z_RX_TOKEN_ASYNC(node_id)    NMBS_Z_SERIAL_RX_ASYNC
+#define _NMBS_Z_RX_TOKEN_IRQ(node_id)      NMBS_Z_SERIAL_RX_IRQ
+#define _NMBS_Z_RX_TOKEN_EXTERNAL(node_id) NMBS_Z_SERIAL_RX_EXTERNAL
+#define _NMBS_Z_RX_TOKEN_AUTO(node_id)     _NMBS_Z_RX_MODE_AUTO_RESOLVE(node_id)
+
+#define _NMBS_Z_RX_MODE_AUTO_RESOLVE(node_id) \
+    ((IS_ENABLED(CONFIG_UART_ASYNC_API) && !IS_ENABLED(CONFIG_DCACHE) && \
+      (DT_NODE_HAS_PROP(node_id, dmas) || \
+       DT_NODE_HAS_PROP(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id), dmas))) \
+     ? NMBS_Z_SERIAL_RX_ASYNC \
+     : (IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN) \
+        ? NMBS_Z_SERIAL_RX_IRQ \
+        : NMBS_Z_SERIAL_RX_EXTERNAL))
+
+#define _NMBS_Z_RX_TOKEN_EXPAND(token, node_id) _NMBS_Z_RX_TOKEN_##token(node_id)
+#define _NMBS_Z_RX_TOKEN_DISPATCH(token, node_id) _NMBS_Z_RX_TOKEN_EXPAND(token, node_id)
+
+#define _NMBS_Z_DT_RX_MODE(node_id) \
+    _NMBS_Z_RX_TOKEN_DISPATCH(DT_STRING_UPPER_TOKEN_OR(node_id, rx_mode, AUTO), node_id)
+/** @endcond */
+
+/**
+ * @brief Initialize a @ref nmbs_z_serial_transport_config_t structure from a Devicetree node.
+ *
+ * Supports nodes compatible with "nanomodbus,serial" or "zephyr,modbus-serial",
+ * as well as direct UART nodes.
+ *
+ * @param node_id Devicetree node identifier.
+ */
+#define NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(node_id) \
+    { \
+        .uart_dev = DEVICE_DT_GET(_NMBS_Z_UART_NODE_FROM_MODBUS(node_id)), \
+        .de_gpio = _NMBS_Z_DT_DE_GPIO(node_id), \
+        .re_gpio = _NMBS_Z_DT_RE_GPIO(node_id), \
+        .baud_rate = _NMBS_Z_DT_BAUD_RATE(node_id), \
+        .de_pre_delay_us = _NMBS_Z_DT_DE_PRE_DELAY(node_id), \
+        .de_post_delay_us = _NMBS_Z_DT_DE_POST_DELAY(node_id), \
+        .parity = UART_CFG_PARITY_NONE, \
+        .stop_bits = UART_CFG_STOP_BITS_1, \
+        .data_bits = UART_CFG_DATA_BITS_8, \
+        .rx_mode = _NMBS_Z_DT_RX_MODE(node_id), \
+        .de_mode = _NMBS_Z_DT_DE_MODE(node_id), \
+        .rx_cb = NULL, \
+        .rx_cb_user_data = NULL, \
+    }
+
+/**
+ * @brief Initialize a @ref nmbs_z_serial_transport_config_t structure from a Devicetree instance.
+ *
+ * @param inst Instance index for "nanomodbus,serial" (or "zephyr,modbus-serial").
+ */
+#define NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT_INST(inst) \
+    COND_CODE_1(DT_NODE_EXISTS(DT_INST(inst, nanomodbus_serial)), \
+        (NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(DT_INST(inst, nanomodbus_serial))), \
+        (NMBS_Z_SERIAL_TRANSPORT_CONFIG_DT(DT_INST(inst, zephyr_modbus_serial))))
+
+/**
+ * @brief Read Modbus slave ID from a child node's reg property.
+ *
+ * @param node_id Devicetree node identifier of a Modbus child slave node.
+ * @return Slave ID (uint8_t compatible integer).
+ */
+#define NMBS_Z_DT_SLAVE_ID(node_id) \
+    COND_CODE_1(DT_NODE_HAS_PROP(node_id, reg), \
+        (DT_PROP(node_id, reg)), \
+        (DT_REG_ADDR(node_id)))
 
 /**
  * @brief Calculate Modbus RTU character silence intervals (t1.5 and t3.5) in microseconds.
@@ -193,6 +299,22 @@ int nmbs_z_serial_transport_stop_rx(nmbs_z_serial_transport_t *transport);
  * @param transport Pointer to transport context.
  */
 void nmbs_z_serial_transport_deinit(nmbs_z_serial_transport_t *transport);
+
+/**
+ * @brief Reconfigure UART line settings and recalculate RTU frame timings.
+ *
+ * Updates baud rate, parity, stop bits, and data bits if @p uart_cfg is not NULL.
+ * If the receiver is currently active, reception is temporarily stopped, line
+ * settings are applied via uart_configure(), timings (t1.5, t3.5) are recalculated,
+ * the ring buffer is flushed to clear transient garbage from the baud switch, and
+ * reception is resumed if it was active.
+ *
+ * @param transport Pointer to transport context.
+ * @param uart_cfg New UART line configuration, or NULL to re-apply/flush only.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_serial_transport_reconfigure(nmbs_z_serial_transport_t *transport,
+                                        const struct uart_config *uart_cfg);
 
 /**
  * @brief Platform read callback for Serial RTU transport.
@@ -341,6 +463,41 @@ int nmbs_z_server_rtu_get_stats(const nmbs_z_server_rtu_t *server, struct nmbs_z
  * @return 0 on success, negative errno on failure.
  */
 int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server);
+
+/**
+ * @brief Set the Modbus RTU server slave address.
+ *
+ * Updates the slave address for the server instance and the underlying core.
+ *
+ * @param server Pointer to server instance.
+ * @param slave_id Modbus RTU slave address (1-247).
+ * @return 0 on success, -EINVAL on invalid parameter.
+ */
+int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t *server, uint8_t slave_id);
+
+/**
+ * @brief Get the current Modbus RTU server slave address.
+ *
+ * @param server Pointer to server instance.
+ * @return Slave address (1-247), or 0 if server is NULL.
+ */
+uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t *server);
+
+/**
+ * @brief Reconfigure RTU server UART line settings and/or slave address.
+ *
+ * If @p slave_id is greater than 0, updates the server slave address.
+ * If @p uart_cfg is not NULL, temporarily pauses the silence timer / rx if the server
+ * was running, reconfigures the underlying serial transport, and resumes rx if running.
+ *
+ * @param server Pointer to server instance.
+ * @param uart_cfg New UART line configuration, or NULL to only change slave ID.
+ * @param slave_id New slave address (1-247), or 0 to keep current slave address.
+ * @return 0 on success, negative errno on failure.
+ */
+int nmbs_z_server_rtu_reconfigure(nmbs_z_server_rtu_t *server,
+                                  const struct uart_config *uart_cfg,
+                                  uint8_t slave_id);
 
 #endif /* CONFIG_NANOMODBUS_SERVER_RTU */
 

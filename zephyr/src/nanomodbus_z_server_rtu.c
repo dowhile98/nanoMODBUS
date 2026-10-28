@@ -256,4 +256,73 @@ int nmbs_z_server_rtu_reset_stats(nmbs_z_server_rtu_t *server)
 #endif
 }
 
+int nmbs_z_server_rtu_set_address(nmbs_z_server_rtu_t *server, uint8_t slave_id)
+{
+    if (!server) {
+        return -EINVAL;
+    }
+
+    if (slave_id == 0 || slave_id > 247) {
+        return -EINVAL;
+    }
+
+    server->core.address_rtu = slave_id;
+    server->server_address = slave_id;
+
+    return 0;
+}
+
+uint8_t nmbs_z_server_rtu_get_address(const nmbs_z_server_rtu_t *server)
+{
+    if (!server) {
+        return 0;
+    }
+
+    return server->server_address;
+}
+
+int nmbs_z_server_rtu_reconfigure(nmbs_z_server_rtu_t *server,
+                                  const struct uart_config *uart_cfg,
+                                  uint8_t slave_id)
+{
+    if (!server) {
+        return -EINVAL;
+    }
+
+    if (slave_id > 247) {
+        return -EINVAL;
+    }
+
+    if (uart_cfg != NULL && uart_cfg->baudrate == 0) {
+        return -EINVAL;
+    }
+
+    if (slave_id > 0) {
+        server->core.address_rtu = slave_id;
+        server->server_address = slave_id;
+    }
+
+    if (uart_cfg != NULL) {
+        bool was_running = (atomic_get(&server->running) != 0);
+
+        if (was_running) {
+            k_timer_stop(&server->silence_timer);
+        }
+
+        int ret = nmbs_z_serial_transport_reconfigure(&server->transport, uart_cfg);
+        if (ret != 0) {
+            return ret;
+        }
+
+        if (was_running) {
+            ret = nmbs_z_serial_transport_start_rx(&server->transport);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+
+    return 0;
+}
+
 #endif /* CONFIG_NANOMODBUS_SERVER_RTU */
