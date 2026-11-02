@@ -720,6 +720,12 @@ list and help text.
 | `NANOMODBUS_SERVER_TCP_BACKLOG` | 4 | Pending connections (still one served at a time) |
 | `NANOMODBUS_TCP_KEEPALIVE` | n | Needs `NET_TCP_KEEPALIVE`; see the idle/interval/count options |
 | `NANOMODBUS_BITFIELD_MAX` | 2000 | Coils/discrete inputs per operation; multiple of 8 |
+| `NANOMODBUS_SHELL` | y | `nmbs` command tree; needs `SHELL` and `NANOMODBUS` |
+| `NANOMODBUS_SHELL_CLIENT` | y | Client commands (FC 01-06, 15, 16); needs `NANOMODBUS_CLIENT` |
+| `NANOMODBUS_SHELL_SERVER` | y | `status` and `reset-stats`; needs `NANOMODBUS_SERVER` |
+| `NANOMODBUS_SHELL_MAX_CLIENTS` | 4 | Static client registry size (1..8) |
+| `NANOMODBUS_SHELL_MAX_SERVERS` | 4 | Static server registry size (1..8) |
+| `NANOMODBUS_SHELL_MAX_DATA_WORDS` | 64 | Per-command data bound (1..125); see [`zephyr-shell-cli.md`](zephyr-shell-cli.md) |
 | `NANOMODBUS_DEBUG` | n | Enables `NMBS_DEBUG` core traffic prints |
 
 ### Function-code pruning
@@ -749,6 +755,8 @@ disabled by default; the remaining function codes are enabled.
 
 ## 15. See also
 
+- [`zephyr-shell-cli.md`](zephyr-shell-cli.md) for the interactive `nmbs` shell
+  commands and instance registration
 - `samples/client_rtu`, `samples/client_tcp`, `samples/server_rtu`,
   `samples/server_tcp`, `samples/modbus_gateway`
 - `zephyr/Kconfig` for the full option list and help text

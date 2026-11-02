@@ -27,13 +27,26 @@ module. Work happens on `feature/zephyr-module`.
 
 ## Hardware & Devicetree Overlays
 
-Target board is `nucleo_h743zi` (STM32H743ZI), not `nucleo_h743`. Each sample
-provides board configurations in `samples/<app>/boards/nucleo_h743zi.overlay` and `.conf`:
+The primary board is `nucleo_h743zi` (STM32H743ZI), not `nucleo_h743`; the RTU
+samples also target `nucleo_f103rb` (STM32F103RB). Each sample provides board
+configurations in `samples/<app>/boards/<board>.overlay` and `.conf`.
 
 - `server_rtu`: `&usart2` (PD5/PD6, 115200) aliased to `modbus-uart`; RS-485 RE/DE driven from `&gpiod 4` through `de-gpios` (software DE, active-high; the hardware RTS DE pinctrl is no longer used). Requires `CONFIG_UART_INTERRUPT_DRIVEN=y`.
 - `client_rtu`: `&usart2` (PD5/PD6, 115200) aliased to `modbus-uart`; RS-485 RE/DE on the same `&gpiod 4` `de-gpios`.
 - `client_tcp` / `server_tcp`: Ethernet MAC `&mac` with DHCP (`CONFIG_NET_L2_ETHERNET=y`, `CONFIG_NET_DHCPV4=y`).
 - `modbus_gateway`: Dual UARTs `&usart2` (`modbus-bus1`) and `&uart4` (`modbus-bus2`, PC10/PC11), plus Ethernet `&mac`.
+
+On `nucleo_f103rb` the two RTU samples use `&usart1` PA9 (TX) / PA10 (RX) aliased
+to `modbus-uart`, with RS-485 RE/DE on `&gpiob 3` through `de-gpios`. The console
+and shell stay on `usart2` (PA2/PA3, ST-LINK VCP), so the Modbus bus is free.
+PB3 is `JTDO` after reset and cannot act as a GPIO, so the overlay sets
+`&pinctrl { swj-cfg = "jtag-disable"; }`: `soc_early_init_hook()` then writes
+`SWJ_CFG = 010`, releasing PB3, PB4 and PA15 while keeping SWD (PA13/PA14) for
+flashing and debugging. No STM32F1 UART node exposes DMA, so reception is
+interrupt driven (`rx-mode = "irq"` on the server) and
+`boards/nucleo_f103rb.conf` enables only `CONFIG_UART_INTERRUPT_DRIVEN` and
+`CONFIG_UART_USE_RUNTIME_CONFIGURE` — the H743 `dmas`, `CONFIG_UART_ASYNC_API`
+and `CONFIG_DCACHE=n` settings do not apply on Cortex-M3.
 
 RS-485 bench wiring, validated on hardware for both RTU samples: PD5 → DI,
 PD6 → RO, PD4 → DE with RE tied to DE (high = TX, low = RX), A/B straight
@@ -136,6 +149,12 @@ request execution, server diagnostics, and instance enumeration without dynamic 
   - `nmbs write-registers [-c <client>] [-u <unit>] [-t <ms>] <addr> <val0> [val1...]` (FC 16)
   - `nmbs status [-s <server>]`: display server operational metrics and error counters.
   - `nmbs reset-stats [-s <server>]`: reset server diagnostic statistics counters to 0.
+
+`samples/client_rtu` does **not** poll on its own by default. Its built-in
+FC03/FC06 loop sits behind `CONFIG_CLIENT_RTU_POLLING` (`samples/client_rtu/Kconfig`,
+default `n`), so the sample starts, registers `rtu0` with the shell and leaves the
+bus free for an external Modbus master or for `nmbs` commands. Build with
+`-DCONFIG_CLIENT_RTU_POLLING=y` to enable the loop.
 
 ## Gotchas
 

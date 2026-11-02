@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2026 nanoMODBUS Contributors
+ * SPDX-License-Identifier: MIT
+ *
+ * USART1 is the Modbus RTU bus on PA9 (TX) / PA10 (RX). This board devicetree
+ * already muxes those pins at 115200, and it keeps the console and the shell
+ * backend on USART2 (PA2/PA3), the ST-LINK virtual COM port, so the two do not
+ * conflict. Only the Modbus child node has to be added here.
+ *
+ * PB3 drives the RS-485 transceiver RE/DE pin in software GPIO mode.
+ * Because RE (active-low) and DE (active-high) are tied together on this
+ * transceiver, a single active-high GPIO acts as both: high = TX, low = RX.
+ *
+ * PB3 is JTDO out of reset, so it cannot act as a GPIO while the full SWJ
+ * configuration is selected. "jtag-disable" writes SWJ_CFG = 010, which
+ * releases PB3, PB4 and PA15 while keeping SWD (PA13/PA14) available for
+ * flashing and debugging.
+ *
+ * The STM32F1 UART nodes expose no DMA channels, so reception is explicitly
+ * interrupt driven instead of the asynchronous path used on the H743.
+ */
+
+/ {
+	aliases {
+		modbus-uart = &usart1;
+		modbus0 = &modbus0;
+	};
+};
+
+&pinctrl {
+	swj-cfg = "jtag-disable";
+};
+
+&usart1 {
+	current-speed = <115200>;
+	status = "okay";
+
+	modbus0: modbus0 {
+		compatible = "nanomodbus,serial";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		de-gpios = <&gpiob 3 GPIO_ACTIVE_HIGH>;
+		de-mode = "auto";
+		rx-mode = "irq";
+
+		server_node: slave@1 {
+			reg = <1>;
+		};
+	};
+};

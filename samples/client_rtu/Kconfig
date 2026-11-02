@@ -1,0 +1,23 @@
+# Copyright (c) 2026 nanoMODBUS Contributors
+# SPDX-License-Identifier: MIT
+
+mainmenu "nanoMODBUS RTU client sample"
+
+config CLIENT_RTU_POLLING
+	bool "Poll the RTU server from main()"
+	default n
+	help
+	  Run the sample's built-in FC03/FC06 polling loop.
+
+	  The loop is disabled by default, so the client starts, registers with the
+	  shell and then leaves the RTU bus idle. That keeps the bus free for an
+	  external Modbus master or for the interactive "nmbs" shell commands.
+
+	  Enable it to make the sample a self-contained client that reads holding
+	  registers and bumps a heartbeat register every second:
+
+	    west build -p always -b nucleo_h743zi samples/client_rtu \
+	      -d build_client_rtu \
+	      -- -DCONFIG_CLIENT_RTU_POLLING=y
+
+source "Kconfig.zephyr"

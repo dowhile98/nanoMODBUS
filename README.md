@@ -274,7 +274,9 @@ west twister -T tests/zephyr -p native_sim --extra-args ZEPHYR_MODULES=$PWD
 ```
 
 See [`docs/zephyr-getting-started.md`](docs/zephyr-getting-started.md) for devicetree/RS-485
-setup, receive modes, memory figures, the full Kconfig reference and troubleshooting.
+setup, receive modes, memory figures, the full Kconfig reference and troubleshooting,
+and [`docs/zephyr-shell-cli.md`](docs/zephyr-shell-cli.md) for the interactive `nmbs`
+shell commands.
 
 ## API reference
 

@@ -111,6 +111,7 @@ int main(void) {
 
     LOG_INF("Modbus RTU client started (server %u, 115200 bps, RX %s)", SERVER_ADDRESS, rx_mode_name(config.rx_mode));
 
+#if defined(CONFIG_CLIENT_RTU_POLLING)
     uint16_t heartbeat = 0;
 
     while (1) {
@@ -136,6 +137,16 @@ int main(void) {
         heartbeat++;
         k_sleep(K_MSEC(POLL_INTERVAL_MS));
     }
+#else
+    /* The bus belongs to whoever drives it: an external Modbus master, or the
+     * "nmbs" shell commands. Nothing is polled automatically.
+     */
+    LOG_INF("Automatic polling disabled; use the 'nmbs' shell commands or build "
+            "with -DCONFIG_CLIENT_RTU_POLLING=y");
+#ifndef CONFIG_NANOMODBUS_SHELL
+    LOG_WRN("Polling is disabled and the shell is not built, so the client stays idle");
+#endif
+#endif /* CONFIG_CLIENT_RTU_POLLING */
 
     return 0;
 }
